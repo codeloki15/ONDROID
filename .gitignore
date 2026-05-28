@@ -1,0 +1,24 @@
+# On-device model binaries (bundled into APK from assets, not tracked in git)
+app/src/main/assets/models/*.litertlm
+app/src/main/assets/models/*.task
+app/src/main/assets/kokoro-en-v0_19/model.onnx
+app/src/main/assets/kokoro-en-v0_19/voices.bin
+app/libs/*.aar
+
+# Local model download cache (outside-tree convenience)
+_models_cache/
+
+# Python server venv (legacy server, not part of standalone app)
+server/venv/
+
+# Gradle / Android build outputs
+.gradle/
+build/
+app/build/
+*.iml
+
+# IDE / local
+.idea/
+local.properties
+.DS_Store
+**/.DS_Store

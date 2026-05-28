@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OmniPro</string>
+    <string name="connection_manager">Connection Manager</string>
+    <string name="chat">Chat</string>
+    <string name="settings">Settings</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="scanning">Scanning for devices…</string>
+    <string name="no_devices_found">No devices found</string>
+    <string name="bluetooth">Bluetooth</string>
+    <string name="websocket">WebSocket</string>
+    <string name="send_message">Type a message…</string>
+    <string name="voice_input">Voice input</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="connecting">Connecting…</string>
+</resources>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- The "O" ring — white stroke circle -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="52"
+        android:strokeAlpha="0.95"
+        android:pathData="M256,256m-155,0a155,155 0,1 1,310 0a155,155 0,1 1,-310 0" />
+
+    <!-- Agent circuit arcs -->
+    <!-- Top-right arc -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#93C5FD"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:pathData="M340,115 Q410,140 405,210" />
+
+    <!-- Bottom-left arc -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#93C5FD"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:pathData="M172,397 Q102,372 107,302" />
+
+    <!-- Left arc -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#93C5FD"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.5"
+        android:pathData="M120,170 Q95,215 100,265" />
+
+    <!-- Agent nodes (dots at circuit endpoints) -->
+    <path
+        android:fillColor="#60A5FA"
+        android:fillAlpha="0.9"
+        android:pathData="M340,115m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
+
+    <path
+        android:fillColor="#818CF8"
+        android:fillAlpha="0.8"
+        android:pathData="M405,210m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+
+    <path
+        android:fillColor="#60A5FA"
+        android:fillAlpha="0.9"
+        android:pathData="M172,397m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
+
+    <path
+        android:fillColor="#818CF8"
+        android:fillAlpha="0.8"
+        android:pathData="M107,302m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+
+    <path
+        android:fillColor="#93C5FD"
+        android:fillAlpha="0.7"
+        android:pathData="M120,170m-4.5,0a4.5,4.5 0,1 1,9 0a4.5,4.5 0,1 1,-9 0" />
+
+    <path
+        android:fillColor="#A78BFA"
+        android:fillAlpha="0.7"
+        android:pathData="M100,265m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+
+    <!-- Center agent dot -->
+    <path
+        android:fillColor="#7C9BF5"
+        android:fillAlpha="0.35"
+        android:pathData="M256,256m-14,0a14,14 0,1 1,28 0a14,14 0,1 1,-28 0" />
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.6"
+        android:pathData="M256,256m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+</vector>
