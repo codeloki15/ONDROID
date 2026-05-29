@@ -8,6 +8,7 @@ import com.locallink.pro.data.db.SessionEntity
 import com.locallink.pro.domain.model.Message
 import com.locallink.pro.domain.model.MessageSender
 import com.locallink.pro.service.llm.LlmEngine
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import java.util.UUID
 import javax.inject.Inject

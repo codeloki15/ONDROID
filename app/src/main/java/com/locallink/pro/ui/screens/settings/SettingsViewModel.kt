@@ -3,6 +3,7 @@ package com.locallink.pro.ui.screens.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.locallink.pro.data.local.SettingsPreferences
+import com.locallink.pro.data.repository.ChatRepository
 import com.locallink.pro.service.voice.VoiceService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -18,8 +19,6 @@ data class SettingsUiState(
     val autoTts: Boolean = true,
     val ttsSpeed: Float = 1.0f,
     val ttsPitch: Float = 1.0f,
-    val autoReconnect: Boolean = true,
-    val keepAlive: Boolean = true,
     val sttEnabled: Boolean = true,
     val selectedSpeaker: Int = 0,
     val numSpeakers: Int = 0,
@@ -30,7 +29,8 @@ data class SettingsUiState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val voiceService: VoiceService,
-    private val settingsPreferences: SettingsPreferences
+    private val settingsPreferences: SettingsPreferences,
+    private val chatRepository: ChatRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -97,16 +97,12 @@ class SettingsViewModel @Inject constructor(
         voiceService.setTtsPitch(pitch)
     }
 
-    fun toggleAutoReconnect(enabled: Boolean) {
-        _uiState.update { it.copy(autoReconnect = enabled) }
-    }
-
-    fun toggleKeepAlive(enabled: Boolean) {
-        _uiState.update { it.copy(keepAlive = enabled) }
-    }
-
     fun toggleSttEnabled(enabled: Boolean) {
         voiceService.setSttEnabled(enabled)
+    }
+
+    fun clearAllChats() {
+        viewModelScope.launch { chatRepository.clearAll() }
     }
 
     fun selectSpeaker(speakerId: Int) {
@@ -130,9 +126,7 @@ class SettingsViewModel @Inject constructor(
                     ttsSpeed = currentState.ttsSpeed,
                     ttsPitch = currentState.ttsPitch,
                     selectedSpeaker = currentState.selectedSpeaker,
-                    sttEnabled = currentState.sttEnabled,
-                    autoReconnect = currentState.autoReconnect,
-                    keepAlive = currentState.keepAlive
+                    sttEnabled = currentState.sttEnabled
                 )
                 settingsPreferences.save(settings)
                 _saveSuccess.emit(true)

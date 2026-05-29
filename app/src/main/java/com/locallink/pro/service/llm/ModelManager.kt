@@ -13,58 +13,53 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 sealed interface ModelState {
-    data object Preparing : ModelState
-    data class Copying(val progress: Float) : ModelState
+    data object Checking : ModelState
     data object Ready : ModelState
+    data class Missing(val expectedPath: String) : ModelState
     data class Error(val message: String) : ModelState
 }
 
+/**
+ * The model is too large to bundle in the APK, so it is pushed to the device once via:
+ *   adb push <model>.task <externalFilesDir>/models/
+ * and loaded in place from there.
+ *
+ * Must be a MediaPipe tasks-genai compatible `.task` bundle (NOT `.litertlm`, which the
+ * tasks-genai LlmInference native engine cannot parse — it aborts with
+ * "Unknown model type: tf_lite_audio_adapter").
+ */
 @Singleton
 class ModelManager @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     companion object {
         private const val TAG = "ModelManager"
-        const val ASSET_PATH = "models/gemma-3n-E2B-it-int4.litertlm"
-        const val MODEL_FILENAME = "gemma-3n-E2B-it-int4.litertlm"
+        const val MODEL_FILENAME = "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task"
     }
 
-    private val _state = MutableStateFlow<ModelState>(ModelState.Preparing)
+    private val _state = MutableStateFlow<ModelState>(ModelState.Checking)
     val state: StateFlow<ModelState> = _state.asStateFlow()
 
-    fun modelFile(): File = File(context.filesDir, "models/$MODEL_FILENAME")
+    /** External files dir is adb-pushable without extra permissions. */
+    fun modelFile(): File = File(context.getExternalFilesDir("models"), MODEL_FILENAME)
 
     fun isReady(): Boolean = modelFile().exists() && modelFile().length() > 0
 
-    /** Copy bundled asset model to filesDir (MediaPipe needs a real file path). Idempotent. */
+    /** Check the pushed model is present and non-empty. Idempotent. */
     suspend fun prepare() = withContext(Dispatchers.IO) {
         try {
-            val target = modelFile()
-            val assetSize = context.assets.openFd(ASSET_PATH).use { it.length }
-            if (target.exists() && target.length() == assetSize) {
+            _state.value = ModelState.Checking
+            val f = modelFile()
+            if (f.exists() && f.length() > 0) {
+                Log.d(TAG, "Model present at ${f.absolutePath} (${f.length()} bytes)")
                 _state.value = ModelState.Ready
-                return@withContext
+            } else {
+                Log.w(TAG, "Model missing at ${f.absolutePath}")
+                _state.value = ModelState.Missing(f.absolutePath)
             }
-            target.parentFile?.mkdirs()
-            _state.value = ModelState.Copying(0f)
-            context.assets.open(ASSET_PATH).use { input ->
-                target.outputStream().use { output ->
-                    val buf = ByteArray(8 * 1024 * 1024)
-                    var copied = 0L
-                    var read = input.read(buf)
-                    while (read >= 0) {
-                        output.write(buf, 0, read)
-                        copied += read
-                        if (assetSize > 0) _state.value = ModelState.Copying(copied.toFloat() / assetSize)
-                        read = input.read(buf)
-                    }
-                }
-            }
-            _state.value = ModelState.Ready
-            Log.d(TAG, "Model ready at ${target.absolutePath} (${target.length()} bytes)")
         } catch (e: Exception) {
-            Log.e(TAG, "Model prepare failed", e)
-            _state.value = ModelState.Error(e.message ?: "Failed to prepare model")
+            Log.e(TAG, "Model check failed", e)
+            _state.value = ModelState.Error(e.message ?: "Failed to check model")
         }
     }
 }

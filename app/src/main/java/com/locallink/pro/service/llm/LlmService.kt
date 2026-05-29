@@ -8,9 +8,16 @@ import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,66 +40,95 @@ class LlmService @Inject constructor(
         private const val TAG = "LlmService"
         private const val MAX_TOKENS = 2048
         private const val MAX_HISTORY_TURNS = 12
+        // The bundled Gemma 3n .litertlm export is text-only for our purposes; keep vision
+        // off unless we confirm the model file supports it (requesting vision on a model
+        // without vision weights fails the graph build).
+        private const val MODEL_SUPPORTS_VISION = false
     }
 
     @Volatile private var engine: LlmInference? = null
 
-    /** Load the MediaPipe engine from the prepared model file. Idempotent. */
+    // MediaPipe forbids concurrent generateResponseAsync calls on sessions from one engine.
+    private val genMutex = Mutex()
+
+    /** Load the MediaPipe engine from the prepared model file. Idempotent. Must run off the UI thread. */
     @Synchronized
     override fun ensureLoaded() {
         if (engine != null) return
         val path = modelManager.modelFile().absolutePath
-        val options = LlmInference.LlmInferenceOptions.builder()
+        val builder = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(path)
             .setMaxTokens(MAX_TOKENS)
-            .setMaxNumImages(1)
-            .build()
-        engine = LlmInference.createFromOptions(context, options)
+            // CPU backend: a multi-GB model on Adreno/GPU commonly OOMs on an 8GB device.
+            .setPreferredBackend(LlmInference.Backend.CPU)
+        if (MODEL_SUPPORTS_VISION) {
+            builder.setMaxNumImages(1)
+        }
+        engine = LlmInference.createFromOptions(context, builder.build())
         Log.d(TAG, "LLM engine loaded from $path")
     }
 
     /**
      * Generate a streamed response. Emits partial text chunks; completes when done.
      * A fresh session is created per call; [history] re-seeds prior turns for context.
+     * Runs off the main thread; serialized so two sends can't overlap.
      */
     override fun generateStream(
         prompt: String,
         image: Bitmap?,
         history: List<Pair<String, String>>,
     ): Flow<String> = callbackFlow {
-        ensureLoaded()
-        val eng = engine ?: throw IllegalStateException("LLM not loaded")
+        val useImage = image != null && MODEL_SUPPORTS_VISION
 
-        val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-            .setTopK(40)
-            .setTemperature(0.8f)
-            .setGraphOptions(GraphOptions.builder().setEnableVisionModality(image != null).build())
-            .build()
-
-        val session = LlmInferenceSession.createFromOptions(eng, sessionOptions)
         try {
-            history.takeLast(MAX_HISTORY_TURNS).forEach { (role, text) ->
-                val speaker = if (role == "assistant") "Model" else "User"
-                session.addQueryChunk("$speaker: $text")
-            }
-            session.addQueryChunk("User: $prompt")
-            if (image != null) {
-                session.addImage(BitmapImageBuilder(image).build())
-            }
-
-            session.generateResponseAsync { partial, done ->
-                trySend(partial)
-                if (done) channel.close()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "generateStream failed", e)
-            channel.close(e)
+            ensureLoaded()
+        } catch (e: Throwable) {
+            Log.e(TAG, "ensureLoaded failed", e)
+            close(e)
+            return@callbackFlow
+        }
+        val eng = engine ?: run {
+            close(IllegalStateException("LLM not loaded"))
+            return@callbackFlow
         }
 
-        awaitClose {
-            try { session.close() } catch (_: Exception) {}
+        genMutex.withLock {
+            val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                .setTopK(40)
+                .setTemperature(0.8f)
+                .apply {
+                    if (useImage) {
+                        setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
+                    }
+                }
+                .build()
+
+            val session = LlmInferenceSession.createFromOptions(eng, sessionOptions)
+            try {
+                // Pass the raw prompt as a single chunk; MediaPipe applies the model's
+                // baked-in chat template. (Multi-turn history re-seeding is intentionally
+                // omitted for now — manual role prefixing fights the template and varies
+                // by model family. Each send is a fresh turn until proper templating lands.)
+                session.addQueryChunk(prompt)
+                if (useImage) {
+                    session.addImage(BitmapImageBuilder(image!!).build())
+                }
+
+                session.generateResponseAsync { partial, done ->
+                    trySend(partial)
+                    if (done) channel.close()
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "generateStream failed", e)
+                channel.close(e)
+            }
+
+            awaitClose {
+                try { session.close() } catch (_: Exception) {}
+            }
         }
-    }
+    }.buffer(capacity = 256, onBufferOverflow = BufferOverflow.SUSPEND)
+        .flowOn(Dispatchers.Default)
 
     fun shutdown() {
         try { engine?.close() } catch (_: Exception) {}

@@ -155,22 +155,20 @@ fun SettingsScreen(
                 )
             }
 
-            // Connection Settings
-            SettingsSection(title = "Connection") {
+            // Data
+            SettingsSection(title = "Data") {
                 SettingsToggle(
-                    title = "Auto Reconnect",
-                    subtitle = "Automatically reconnect on connection loss",
-                    icon = Icons.Default.Autorenew,
-                    checked = uiState.autoReconnect,
-                    onCheckedChange = viewModel::toggleAutoReconnect
+                    title = "Speech-to-Text",
+                    subtitle = "Enable voice input",
+                    icon = Icons.Default.Mic,
+                    checked = uiState.sttEnabled,
+                    onCheckedChange = viewModel::toggleSttEnabled
                 )
-
-                SettingsToggle(
-                    title = "Keep Alive",
-                    subtitle = "Send periodic pings to maintain connection",
-                    icon = Icons.Default.FavoriteBorder,
-                    checked = uiState.keepAlive,
-                    onCheckedChange = viewModel::toggleKeepAlive
+                SettingsAction(
+                    title = "Clear all chats",
+                    subtitle = "Delete all conversations from this device",
+                    icon = Icons.Default.DeleteSweep,
+                    onClick = viewModel::clearAllChats
                 )
             }
 
@@ -406,6 +404,38 @@ private fun SettingsSpeakerPicker(
                 style = MaterialTheme.typography.bodySmall,
                 color = OmniTextTertiary,
                 modifier = Modifier.padding(start = 34.dp, top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsAction(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            tint = OmniTextTertiary
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = OmniTextSecondary
             )
         }
     }

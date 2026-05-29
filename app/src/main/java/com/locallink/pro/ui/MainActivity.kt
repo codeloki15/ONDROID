@@ -46,14 +46,8 @@ class MainActivity : ComponentActivity() {
     private fun requestPermissions() {
         val permissions = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+            Manifest.permission.CAMERA
         )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)

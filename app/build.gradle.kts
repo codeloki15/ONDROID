@@ -53,6 +53,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            // MediaPipe + sherpa-onnx both ship native libs; keep the first if any collide.
+            pickFirsts += listOf("**/*.so")
+            // Skip native symbol stripping (slow on this filesystem; unneeded for debug sideload).
+            keepDebugSymbols += "**/*.so"
+        }
     }
 
     // Don't compress model files in assets
@@ -67,6 +73,8 @@ dependencies {
 
     // On-device LLM (MediaPipe GenAI) — Gemma 3n
     implementation("com.google.mediapipe:tasks-genai:0.10.27")
+    // Provides com.google.mediapipe.framework.image (MPImage/BitmapImageBuilder) for vision input
+    implementation("com.google.mediapipe:tasks-vision:0.10.26")
 
     // CameraX (vision input)
     implementation("androidx.camera:camera-core:1.4.1")
@@ -117,6 +125,7 @@ dependencies {
 
     // Testing
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.11.00"))

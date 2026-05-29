@@ -2,42 +2,50 @@ package com.locallink.pro.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.locallink.pro.ui.screens.connection.ConnectionScreen
-import com.locallink.pro.ui.screens.shell.MainShellScreen
+import androidx.navigation.navArgument
+import com.locallink.pro.ui.screens.chat.ChatScreen
+import com.locallink.pro.ui.screens.model.ModelGateScreen
+import com.locallink.pro.ui.screens.sessions.SessionsScreen
+import com.locallink.pro.ui.screens.settings.SettingsScreen
 
 object Routes {
-    const val CONNECTION = "connection"
-    const val MAIN = "main"
+    const val GATE = "gate"
+    const val SESSIONS = "sessions"
+    const val CHAT = "chat"            // chat?sessionId={id}
+    const val SETTINGS = "settings"
 }
 
 @Composable
-fun LocalLinkNavGraph(
-    navController: NavHostController
-) {
-    NavHost(
-        navController = navController,
-        startDestination = Routes.CONNECTION
-    ) {
-        composable(Routes.CONNECTION) {
-            ConnectionScreen(
-                onConnected = {
-                    navController.navigate(Routes.MAIN) {
-                        popUpTo(Routes.CONNECTION) { inclusive = false }
-                    }
+fun LocalLinkNavGraph(navController: NavHostController) {
+    NavHost(navController = navController, startDestination = Routes.GATE) {
+        composable(Routes.GATE) {
+            ModelGateScreen(onReady = {
+                navController.navigate(Routes.SESSIONS) {
+                    popUpTo(Routes.GATE) { inclusive = true }
                 }
+            })
+        }
+        composable(Routes.SESSIONS) {
+            SessionsScreen(onOpenSession = { id ->
+                navController.navigate("${Routes.CHAT}?sessionId=${id ?: ""}")
+            })
+        }
+        composable(
+            "${Routes.CHAT}?sessionId={sessionId}",
+            arguments = listOf(navArgument("sessionId") { type = NavType.StringType; defaultValue = "" }),
+        ) { entry ->
+            val sid = entry.arguments?.getString("sessionId")?.ifBlank { null }
+            ChatScreen(
+                sessionId = sid,
+                onBack = { navController.popBackStack() },
+                onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
             )
         }
-
-        composable(Routes.MAIN) {
-            MainShellScreen(
-                onDisconnect = {
-                    navController.navigate(Routes.CONNECTION) {
-                        popUpTo(Routes.MAIN) { inclusive = true }
-                    }
-                }
-            )
+        composable(Routes.SETTINGS) {
+            SettingsScreen(onBack = { navController.popBackStack() })
         }
     }
 }
