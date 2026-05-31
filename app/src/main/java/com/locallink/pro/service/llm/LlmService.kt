@@ -29,6 +29,13 @@ interface LlmEngine {
         image: Bitmap? = null,
         history: List<Pair<String, String>> = emptyList(),
     ): Flow<String>
+
+    /**
+     * Generate from a fully-built prompt string (the caller applies the chat template,
+     * e.g. [QwenChatTemplate]). Used by the agent/tool loop. [temperature] is lowered on
+     * tool-decision turns for more deterministic tag/JSON output.
+     */
+    fun generateRaw(prompt: String, temperature: Float = 0.8f): Flow<String>
 }
 
 @Singleton
@@ -123,6 +130,43 @@ class LlmService @Inject constructor(
                 channel.close(e)
             }
 
+            awaitClose {
+                try { session.close() } catch (_: Exception) {}
+            }
+        }
+    }.buffer(capacity = 256, onBufferOverflow = BufferOverflow.SUSPEND)
+        .flowOn(Dispatchers.Default)
+
+    /** Run a pre-templated prompt (used by the tool/agent loop). No image, no extra templating. */
+    override fun generateRaw(prompt: String, temperature: Float): Flow<String> = callbackFlow {
+        try {
+            ensureLoaded()
+        } catch (e: Throwable) {
+            Log.e(TAG, "ensureLoaded failed", e)
+            close(e)
+            return@callbackFlow
+        }
+        val eng = engine ?: run {
+            close(IllegalStateException("LLM not loaded"))
+            return@callbackFlow
+        }
+
+        genMutex.withLock {
+            val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                .setTopK(40)
+                .setTemperature(temperature)
+                .build()
+            val session = LlmInferenceSession.createFromOptions(eng, sessionOptions)
+            try {
+                session.addQueryChunk(prompt)
+                session.generateResponseAsync { partial, done ->
+                    trySend(partial)
+                    if (done) channel.close()
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "generateRaw failed", e)
+                channel.close(e)
+            }
             awaitClose {
                 try { session.close() } catch (_: Exception) {}
             }

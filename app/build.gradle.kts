@@ -88,6 +88,9 @@ dependencies {
     // EXIF orientation handling for captured/picked images
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 
+    // WorkManager (deferred reminders via schedule_reminder tool)
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
     // Core Android
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")

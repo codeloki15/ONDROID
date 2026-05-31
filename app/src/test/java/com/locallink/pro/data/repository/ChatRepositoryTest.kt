@@ -16,10 +16,13 @@ class ChatRepositoryTest {
             image: android.graphics.Bitmap?,
             history: List<Pair<String, String>>,
         ): Flow<String> = flowOf("Hello", " world")
+
+        override fun generateRaw(prompt: String, temperature: Float): Flow<String> =
+            flowOf("Hello", " world")
     }
 
     @Test fun streamingAccumulatesIntoFullText() = runTest {
-        val chunks = fakeEngine.generateStream("hi").toList()
+        val chunks = fakeEngine.generateRaw("hi").toList()
         assertEquals("Hello world", chunks.joinToString(""))
     }
 }

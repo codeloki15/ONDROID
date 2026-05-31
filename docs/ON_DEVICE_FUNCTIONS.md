@@ -8,6 +8,41 @@
 
 ---
 
+> **UPDATE:** All Tier-1 + Tier-2 functions below are now IMPLEMENTED (Qwen2.5-1.5B emits `<tool_call>` JSON, parsed and executed on-device). See the example commands below.
+
+## What's possible — example commands
+
+OmniPin runs fully offline, on-device — no cloud, no network. Just talk to it naturally and it picks the right tool.
+
+### Info
+- **Date & time** — "What's today's date?" / "What time is it right now?" → reads the device clock and tells you instantly.
+- **Calculate** — "What's 18% tip on a $64 bill?" / "Square root of 2025?" → evaluates the math and returns the answer.
+- **Battery** — "How much battery do I have left?" / "Am I charging?" → reports current charge level and charging state.
+
+### Device control
+- **Flashlight** — "Turn on the flashlight." / "Kill the torch." → toggles the camera LED on or off.
+- **Timer** — "Set a timer for 10 minutes." / "Start a 90-second timer." → starts a countdown timer.
+- **Alarm** — "Wake me up at 6:30am." / "Set an alarm for 2pm tomorrow." → creates an alarm in the clock app.
+- **Volume** — "Turn the volume up to max." / "Mute the media volume." → adjusts the device volume level.
+- **Open settings** — "Open Wi-Fi settings." / "Take me to Bluetooth settings." → jumps straight to the requested settings page.
+
+### Productivity
+- **Clipboard** — "Copy 'meet at 7pm' to my clipboard." / "What's on my clipboard?" → writes to or reads from the clipboard.
+- **Create note** — "Note: pick up dry cleaning Friday." / "Jot down the Wi-Fi password is hunter2." → saves a note.
+- **Calendar event** — "Add a dentist appointment tomorrow at 3pm." / "Schedule a team sync Monday 10–11am." → creates a calendar event.
+
+### Communication
+- **Add contact** — "Save Priya's number, 555-0142." / "Add a new contact: Sam, sam@work.com." → creates a contact.
+- **Send SMS** — "Text Mom that I'm running late." / "Message 555-0199: on my way." → opens a pre-filled SMS ready to send.
+- **Dial** — "Call Dad." / "Dial 555-0123." → opens the dialer with the number loaded.
+
+### Multi-step examples
+- **"What's 15% of 80, then set a timer for that many minutes."** → calculates 12, then starts a 12-minute timer.
+- **"Copy my Wi-Fi password to the clipboard and make a note of it too."** → writes the text to the clipboard, then saves a matching note.
+- **"Check my battery, and if it's low set a reminder alarm for 1 hour from now to charge."** → reads the battery level, then sets an alarm an hour out.
+
+---
+
 ## Quick legend
 
 | Symbol | Meaning |

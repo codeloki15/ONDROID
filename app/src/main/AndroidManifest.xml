@@ -12,6 +12,19 @@
     <!-- Camera (vision input) -->
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- Tool: set_timer / set_alarm (delegates to the system Clock app) -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
+    <!-- Tool: make_phone_call -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Tool: read_contacts -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Tool: read_calendar -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Tool: launch_app — see installed apps for fuzzy launch -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />

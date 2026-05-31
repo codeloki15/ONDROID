@@ -7,7 +7,8 @@ import com.locallink.pro.data.db.SessionDao
 import com.locallink.pro.data.db.SessionEntity
 import com.locallink.pro.domain.model.Message
 import com.locallink.pro.domain.model.MessageSender
-import com.locallink.pro.service.llm.LlmEngine
+import com.locallink.pro.service.llm.AgentEvent
+import com.locallink.pro.service.llm.AgentOrchestrator
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import java.util.UUID
@@ -18,7 +19,7 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor(
     private val sessionDao: SessionDao,
     private val messageDao: MessageDao,
-    private val llm: LlmEngine,
+    private val agent: AgentOrchestrator,
 ) {
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
@@ -65,15 +66,43 @@ class ChatRepository @Inject constructor(
 
         _isAiResponding.value = true
         _streamingText.value = ""
-        val sb = StringBuilder()
         try {
-            llm.generateStream(prompt = text, image = image, history = history).collect { chunk ->
-                sb.append(chunk)
-                _streamingText.value = sb.toString()
+            agent.run(
+                history = history,
+                userText = text,
+                // First version auto-approves; a confirm UX can hook in here later.
+                confirm = { _, _ -> true },
+            ).collect { event ->
+                when (event) {
+                    is AgentEvent.Token -> _streamingText.value = event.text
+                    is AgentEvent.ToolCall -> {
+                        messageDao.insert(
+                            MessageEntity(
+                                sessionId = sessionId, role = "tool_call",
+                                text = "${event.name}(${event.argsJson})",
+                                timestamp = System.currentTimeMillis(),
+                            )
+                        )
+                    }
+                    is AgentEvent.ToolResult -> {
+                        messageDao.insert(
+                            MessageEntity(
+                                sessionId = sessionId, role = "tool_result",
+                                text = "${event.name} → ${event.result}",
+                                timestamp = System.currentTimeMillis(),
+                            )
+                        )
+                    }
+                    is AgentEvent.Final -> {
+                        messageDao.insert(
+                            MessageEntity(
+                                sessionId = sessionId, role = "assistant",
+                                text = event.text, timestamp = System.currentTimeMillis(),
+                            )
+                        )
+                    }
+                }
             }
-            messageDao.insert(
-                MessageEntity(sessionId = sessionId, role = "assistant", text = sb.toString(), timestamp = System.currentTimeMillis())
-            )
         } catch (e: Exception) {
             messageDao.insert(
                 MessageEntity(sessionId = sessionId, role = "system", text = "Error: ${e.message}", timestamp = System.currentTimeMillis())
@@ -106,7 +135,11 @@ class ChatRepository @Inject constructor(
 
     private fun MessageEntity.toDomain() = Message(
         id = id,
-        text = text,
+        text = when (role) {
+            "tool_call" -> "🔧 $text"
+            "tool_result" -> "↳ $text"
+            else -> text
+        },
         sender = when (role) {
             "user" -> MessageSender.USER
             "assistant" -> MessageSender.AI
