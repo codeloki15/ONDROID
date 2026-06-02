@@ -35,8 +35,10 @@ class SettingsPreferences(private val context: Context) {
         private val KEY_AUTO_RECONNECT = booleanPreferencesKey("auto_reconnect")
         private val KEY_KEEP_ALIVE = booleanPreferencesKey("keep_alive")
 
-        // Groq (cloud LLM) API key
-        private val KEY_GROQ_API_KEY = stringPreferencesKey("groq_api_key")
+        // OpenRouter (cloud LLM) API key + selected model id
+        private val KEY_OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
+        private val KEY_OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
+        const val DEFAULT_MODEL = "openai/gpt-oss-120b"
     }
 
     // Application-scoped — survives ViewModel destruction
@@ -64,17 +66,30 @@ class SettingsPreferences(private val context: Context) {
         )
     }
 
-    // ─── Groq API key (cloud LLM) ───────────────────────────────────────────
-    val groqApiKey: Flow<String> = context.settingsDataStore.data.map { prefs ->
-        prefs[KEY_GROQ_API_KEY] ?: ""
+    // ─── OpenRouter API key + model (cloud LLM) ─────────────────────────────
+    val openRouterApiKey: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[KEY_OPENROUTER_API_KEY] ?: ""
     }
 
-    suspend fun loadGroqApiKey(): String = groqApiKey.first()
+    val openRouterModel: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[KEY_OPENROUTER_MODEL] ?: DEFAULT_MODEL
+    }
 
-    fun saveGroqApiKey(key: String) {
+    suspend fun loadOpenRouterApiKey(): String = openRouterApiKey.first()
+    suspend fun loadOpenRouterModel(): String = openRouterModel.first()
+
+    fun saveOpenRouterApiKey(key: String) {
         scope.launch {
             withContext(NonCancellable) {
-                context.settingsDataStore.edit { it[KEY_GROQ_API_KEY] = key.trim() }
+                context.settingsDataStore.edit { it[KEY_OPENROUTER_API_KEY] = key.trim() }
+            }
+        }
+    }
+
+    fun saveOpenRouterModel(model: String) {
+        scope.launch {
+            withContext(NonCancellable) {
+                context.settingsDataStore.edit { it[KEY_OPENROUTER_MODEL] = model.trim() }
             }
         }
     }

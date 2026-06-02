@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.locallink.pro.data.local.SettingsPreferences
 import com.locallink.pro.data.repository.ChatRepository
+import com.locallink.pro.service.llm.OpenRouterClient
+import com.locallink.pro.service.llm.OpenRouterModel
 import com.locallink.pro.service.voice.VoiceService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -24,14 +26,20 @@ data class SettingsUiState(
     val numSpeakers: Int = 0,
     val isPreviewPlaying: Boolean = false,
     val previewingSpeakerId: Int? = null,
-    val groqApiKey: String = ""
+    val apiKey: String = "",
+    val selectedModel: String = SettingsPreferences.DEFAULT_MODEL,
+    val models: List<OpenRouterModel> = emptyList(),
+    val loadingModels: Boolean = false,
+    val modelsError: String? = null,
+    val freeOnly: Boolean = false,
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val voiceService: VoiceService,
     private val settingsPreferences: SettingsPreferences,
-    private val chatRepository: ChatRepository
+    private val chatRepository: ChatRepository,
+    private val openRouter: OpenRouterClient,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -85,17 +93,50 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(numSpeakers = count) }
         }
 
-        // Load saved Groq API key
+        // Load saved OpenRouter key + model
         viewModelScope.launch {
-            settingsPreferences.groqApiKey.collect { key ->
-                _uiState.update { it.copy(groqApiKey = key) }
+            settingsPreferences.openRouterApiKey.collect { key ->
+                _uiState.update { it.copy(apiKey = key) }
             }
         }
+        viewModelScope.launch {
+            settingsPreferences.openRouterModel.collect { m ->
+                _uiState.update { it.copy(selectedModel = m) }
+            }
+        }
+        // Populate the model list once (catalog is public, no key needed)
+        fetchModels()
     }
 
-    fun setGroqApiKey(key: String) {
-        _uiState.update { it.copy(groqApiKey = key) }
-        settingsPreferences.saveGroqApiKey(key)
+    fun setApiKey(key: String) {
+        _uiState.update { it.copy(apiKey = key) }
+        settingsPreferences.saveOpenRouterApiKey(key)
+    }
+
+    fun selectModel(id: String) {
+        _uiState.update { it.copy(selectedModel = id) }
+        settingsPreferences.saveOpenRouterModel(id)
+    }
+
+    fun toggleFreeOnly() {
+        _uiState.update { it.copy(freeOnly = !it.freeOnly) }
+    }
+
+    fun fetchModels() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(loadingModels = true, modelsError = null) }
+            openRouter.fetchModels().fold(
+                onSuccess = { list ->
+                    // Only tool-capable models (device actions need tools), sorted: free first then name.
+                    val toolModels = list.filter { it.toolCapable }
+                        .sortedWith(compareByDescending<OpenRouterModel> { it.free }.thenBy { it.name })
+                    _uiState.update { it.copy(models = toolModels, loadingModels = false) }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(loadingModels = false, modelsError = e.message ?: "Failed to load models") }
+                },
+            )
+        }
     }
 
     fun toggleAutoTts(enabled: Boolean) {

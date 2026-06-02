@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -18,21 +19,33 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** One model option for the in-app picker. */
+data class OpenRouterModel(
+    val id: String,
+    val name: String,
+    val free: Boolean,
+    val toolCapable: Boolean,
+    val contextLength: Int,
+)
+
 /**
- * Cloud brain: Groq's openai/gpt-oss-120b. Runs the full chat + tool-calling loop using
- * the OpenAI-compatible Chat Completions API, executing tool calls via [ToolRegistry]
- * (the same 23 on-device handlers). Emits [AgentEvent]s so it reuses the chat UI wiring.
+ * Cloud brain via OpenRouter (OpenAI-compatible). Runs the chat + tool-calling loop using
+ * the user's selected model, executing tool calls through [ToolRegistry] (the 23 on-device
+ * handlers). Emits [AgentEvent]s so it reuses the chat UI wiring. Also lists models for the picker.
  */
 @Singleton
-class GroqClient @Inject constructor(
+class OpenRouterClient @Inject constructor(
     private val registry: ToolRegistry,
     private val settings: SettingsPreferences,
 ) {
     companion object {
-        private const val TAG = "GroqClient"
-        private const val URL = "https://api.groq.com/openai/v1/chat/completions"
-        private const val MODEL = "openai/gpt-oss-120b"
+        private const val TAG = "OpenRouterClient"
+        private const val BASE = "https://openrouter.ai/api/v1"
+        private const val CHAT_URL = "$BASE/chat/completions"
+        private const val MODELS_URL = "$BASE/models"
         private const val MAX_HOPS = 5
+        private const val REFERER = "https://omnipin.app"
+        private const val TITLE = "OmniPin"
         private const val SYSTEM =
             "You are Omni, a helpful assistant running on the user's Android phone. " +
             "You can perform on-device actions by calling the provided tools (set timers/alarms, " +
@@ -46,24 +59,61 @@ class GroqClient @Inject constructor(
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    suspend fun hasKey(): Boolean = settings.loadGroqApiKey().isNotBlank()
+    suspend fun hasKey(): Boolean = settings.loadOpenRouterApiKey().isNotBlank()
 
-    /**
-     * @param history prior (role, text) pairs (role in {"user","assistant"}).
-     * @param confirm invoked for non-read-only tool calls; true to execute.
-     */
+    private fun authed(builder: Request.Builder, key: String): Request.Builder =
+        builder.addHeader("Authorization", "Bearer $key")
+            .addHeader("HTTP-Referer", REFERER)
+            .addHeader("X-Title", TITLE)
+
+    /** Fetch the model catalog (filtered + flagged) for the in-app picker. */
+    suspend fun fetchModels(): Result<List<OpenRouterModel>> = withContext(Dispatchers.IO) {
+        val key = settings.loadOpenRouterApiKey()
+        try {
+            val reqB = Request.Builder().url(MODELS_URL).get()
+            if (key.isNotBlank()) authed(reqB, key)
+            http.newCall(reqB.build()).execute().use { resp ->
+                val text = resp.body?.string() ?: return@withContext Result.failure(Exception("empty"))
+                if (!resp.isSuccessful) return@withContext Result.failure(Exception("HTTP ${resp.code}"))
+                val data = JSONObject(text).optJSONArray("data") ?: JSONArray()
+                val out = ArrayList<OpenRouterModel>(data.length())
+                for (i in 0 until data.length()) {
+                    val m = data.getJSONObject(i)
+                    val id = m.optString("id")
+                    if (id.isBlank()) continue
+                    val sp = m.optJSONArray("supported_parameters")
+                    val toolCap = sp != null && (0 until sp.length()).any { sp.optString(it) == "tools" }
+                    val pricing = m.optJSONObject("pricing")
+                    val free = id.endsWith(":free") ||
+                        (pricing?.optString("prompt") == "0" && pricing.optString("completion") == "0")
+                    out += OpenRouterModel(
+                        id = id,
+                        name = m.optString("name", id),
+                        free = free,
+                        toolCapable = toolCap,
+                        contextLength = m.optInt("context_length", 0),
+                    )
+                }
+                Result.success(out)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchModels failed", e)
+            Result.failure(e)
+        }
+    }
+
     fun run(
         history: List<Pair<String, String>>,
         userText: String,
         confirm: suspend (name: String, argsJson: String) -> Boolean,
     ): Flow<AgentEvent> = flow {
-        val key = settings.loadGroqApiKey()
+        val key = settings.loadOpenRouterApiKey()
         if (key.isBlank()) {
-            emit(AgentEvent.Final("No Groq API key set. Add one in Settings → Groq API key."))
+            emit(AgentEvent.Final("No OpenRouter API key set. Add one in Settings → AI Model."))
             return@flow
         }
+        val model = settings.loadOpenRouterModel()
 
-        // Build the OpenAI messages array.
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content", SYSTEM))
         for ((role, text) in history) {
@@ -78,16 +128,14 @@ class GroqClient @Inject constructor(
         while (hop < MAX_HOPS) {
             hop++
             val body = JSONObject()
-                .put("model", MODEL)
+                .put("model", model)
                 .put("messages", messages)
                 .put("tools", tools)
                 .put("tool_choice", "auto")
                 .put("temperature", 0.6)
-                .put("reasoning_effort", "low")
-                .put("max_completion_tokens", 1024)
 
             val respMsg = postChat(key, body) ?: run {
-                emit(AgentEvent.Final("Network error talking to Groq. Check connection and API key."))
+                emit(AgentEvent.Final("Network error talking to OpenRouter. Check connection and API key."))
                 return@flow
             }
 
@@ -99,15 +147,13 @@ class GroqClient @Inject constructor(
                 return@flow
             }
 
-            // Echo the assistant tool-call message verbatim, then append one tool result per call.
             messages.put(respMsg)
             for (i in 0 until toolCalls.length()) {
                 val tc = toolCalls.getJSONObject(i)
                 val id = tc.optString("id")
                 val fn = tc.optJSONObject("function") ?: JSONObject()
                 val name = fn.optString("name")
-                val argsStr = fn.optString("arguments", "{}")
-                val args = try { JSONObject(argsStr) } catch (_: Exception) { JSONObject() }
+                val args = try { JSONObject(fn.optString("arguments", "{}")) } catch (_: Exception) { JSONObject() }
 
                 val readOnly = !registry.requiresConfirmation(name)
                 emit(AgentEvent.ToolCall(id, name, args.toString(), readOnly))
@@ -124,26 +170,22 @@ class GroqClient @Inject constructor(
                         .put("name", name).put("content", result)
                 )
             }
-            // loop: re-POST with tool results so the model produces the final reply
         }
 
         Log.w(TAG, "Hit MAX_HOPS")
         emit(AgentEvent.Final("(Stopped after $MAX_HOPS tool steps.)"))
     }.flowOn(Dispatchers.IO)
 
-    /** POST one chat completion; return choices[0].message JSONObject, or null on failure. */
     private fun postChat(key: String, body: JSONObject): JSONObject? {
         return try {
-            val req = Request.Builder()
-                .url(URL)
-                .addHeader("Authorization", "Bearer $key")
+            val req = authed(Request.Builder().url(CHAT_URL), key)
                 .post(body.toString().toRequestBody(json))
                 .build()
             http.newCall(req).execute().use { resp ->
                 val text = resp.body?.string() ?: return null
                 if (!resp.isSuccessful) {
-                    Log.e(TAG, "Groq ${resp.code}: ${text.take(300)}")
-                    return JSONObject().put("content", "Groq error ${resp.code}: ${shortErr(text)}")
+                    Log.e(TAG, "OpenRouter ${resp.code}: ${text.take(300)}")
+                    return JSONObject().put("content", "OpenRouter error ${resp.code}: ${shortErr(text)}")
                 }
                 JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
             }

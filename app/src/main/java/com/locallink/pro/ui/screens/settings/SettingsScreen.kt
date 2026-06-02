@@ -156,28 +156,63 @@ fun SettingsScreen(
                 )
             }
 
-            // AI Model — Groq cloud (gpt-oss-120b)
+            // AI Model — OpenRouter cloud (pick any tool-capable model)
             SettingsSection(title = "AI Model") {
                 Text(
-                    "Set a Groq API key to use the cloud gpt-oss-120b model for chat and " +
-                        "function calling (fast, accurate). Leave blank to use the on-device model. " +
-                        "Get a key at console.groq.com.",
+                    "Add an OpenRouter API key to use a cloud model for chat + function calling. " +
+                        "Leave blank to use the on-device model (offline). Get a key at openrouter.ai/keys.",
                     style = MaterialTheme.typography.bodySmall,
                     color = OmniTextSecondary,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
                 OutlinedTextField(
-                    value = uiState.groqApiKey,
-                    onValueChange = viewModel::setGroqApiKey,
-                    label = { Text("Groq API key") },
-                    placeholder = { Text("gsk_...") },
+                    value = uiState.apiKey,
+                    onValueChange = viewModel::setApiKey,
+                    label = { Text("OpenRouter API key") },
+                    placeholder = { Text("sk-or-v1-...") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Model picker (tool-capable models from OpenRouter)
+                var expanded by remember { mutableStateOf(false) }
+                val filtered = remember(uiState.models, uiState.freeOnly) {
+                    if (uiState.freeOnly) uiState.models.filter { it.free } else uiState.models
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Model", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text("Free only", style = MaterialTheme.typography.labelMedium, color = OmniTextSecondary)
+                    Switch(checked = uiState.freeOnly, onCheckedChange = { viewModel.toggleFreeOnly() })
+                }
+                OutlinedButton(
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(uiState.selectedModel, maxLines = 1)
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    if (uiState.loadingModels) {
+                        DropdownMenuItem(text = { Text("Loading models…") }, onClick = {})
+                    }
+                    uiState.modelsError?.let { err ->
+                        DropdownMenuItem(
+                            text = { Text("Error: $err — tap to retry") },
+                            onClick = { viewModel.fetchModels() }
+                        )
+                    }
+                    filtered.take(80).forEach { m ->
+                        DropdownMenuItem(
+                            text = { Text((if (m.free) "🆓 " else "") + m.name, maxLines = 1) },
+                            onClick = { viewModel.selectModel(m.id); expanded = false }
+                        )
+                    }
+                }
                 Text(
-                    if (uiState.groqApiKey.isBlank()) "Using on-device model (offline)"
-                    else "Using Groq gpt-oss-120b (cloud)",
+                    if (uiState.apiKey.isBlank()) "Using on-device model (offline)"
+                    else "Using ${uiState.selectedModel} (OpenRouter)",
                     style = MaterialTheme.typography.labelSmall,
                     color = OmniTextSecondary,
                     modifier = Modifier.padding(top = 4.dp)
