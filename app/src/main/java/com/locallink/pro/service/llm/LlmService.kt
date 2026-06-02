@@ -45,7 +45,7 @@ class LlmService @Inject constructor(
 ) : LlmEngine {
     companion object {
         private const val TAG = "LlmService"
-        private const val MAX_TOKENS = 2048
+        private const val MAX_TOKENS = 4096
         private const val MAX_HISTORY_TURNS = 12
         // The bundled Gemma 3n .litertlm export is text-only for our purposes; keep vision
         // off unless we confirm the model file supports it (requesting vision on a model

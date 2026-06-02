@@ -43,7 +43,11 @@ object QwenChatTemplate {
         append(IM_START).append("assistant\n")
     }
 
-    /** The verbatim Qwen2.5 Hermes tool-declaration block, appended after the system text. */
+    /**
+     * The Qwen2.5 Hermes tool-declaration block. Each tool's JSON is MINIFIED (whitespace
+     * stripped) and descriptions kept short — a 1.5B model with a bounded context can't
+     * absorb 23 pretty-printed schemas, so compactness directly improves tool-calling.
+     */
     private fun toolsBlock(tools: List<ToolHandler>): String = buildString {
         append("\n\n# Tools\n\n")
         append("You may call one or more functions to assist with the user query.\n\n")
@@ -51,12 +55,12 @@ object QwenChatTemplate {
         append("<tools>")
         for (t in tools) {
             append("\n")
-            append("{\"type\": \"function\", \"function\": {\"name\": \"")
+            append("{\"type\":\"function\",\"function\":{\"name\":\"")
             append(t.name)
-            append("\", \"description\": \"")
-            append(t.description.replace("\"", "\\\""))
-            append("\", \"parameters\": ")
-            append(t.parametersJson)
+            append("\",\"description\":\"")
+            append(minify(t.description).replace("\"", "\\\""))
+            append("\",\"parameters\":")
+            append(minify(t.parametersJson))
             append("}}")
         }
         append("\n</tools>\n\n")
@@ -64,6 +68,10 @@ object QwenChatTemplate {
         append("within <tool_call></tool_call> XML tags:\n")
         append("<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>")
     }
+
+    /** Collapse runs of whitespace/newlines (from pretty-printed schemas) into single spaces. */
+    private fun minify(s: String): String =
+        s.replace(Regex("\\s+"), " ").trim()
 
     /**
      * Continuation prompt for the agent loop: the running transcript already ends with the

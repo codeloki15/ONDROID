@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -152,6 +153,34 @@ fun SettingsScreen(
                     onValueChange = viewModel::setTtsPitch,
                     valueRange = 0.5f..2.0f,
                     icon = Icons.Default.Tune
+                )
+            }
+
+            // AI Model — Groq cloud (gpt-oss-120b)
+            SettingsSection(title = "AI Model") {
+                Text(
+                    "Set a Groq API key to use the cloud gpt-oss-120b model for chat and " +
+                        "function calling (fast, accurate). Leave blank to use the on-device model. " +
+                        "Get a key at console.groq.com.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OmniTextSecondary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                OutlinedTextField(
+                    value = uiState.groqApiKey,
+                    onValueChange = viewModel::setGroqApiKey,
+                    label = { Text("Groq API key") },
+                    placeholder = { Text("gsk_...") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    if (uiState.groqApiKey.isBlank()) "Using on-device model (offline)"
+                    else "Using Groq gpt-oss-120b (cloud)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = OmniTextSecondary,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
 

@@ -9,6 +9,7 @@ import com.locallink.pro.domain.model.Message
 import com.locallink.pro.domain.model.MessageSender
 import com.locallink.pro.service.llm.AgentEvent
 import com.locallink.pro.service.llm.AgentOrchestrator
+import com.locallink.pro.service.llm.GroqClient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import java.util.UUID
@@ -20,6 +21,7 @@ class ChatRepository @Inject constructor(
     private val sessionDao: SessionDao,
     private val messageDao: MessageDao,
     private val agent: AgentOrchestrator,
+    private val groq: GroqClient,
 ) {
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
@@ -67,12 +69,13 @@ class ChatRepository @Inject constructor(
         _isAiResponding.value = true
         _streamingText.value = ""
         try {
-            agent.run(
-                history = history,
-                userText = text,
-                // First version auto-approves; a confirm UX can hook in here later.
-                confirm = { _, _ -> true },
-            ).collect { event ->
+            // Prefer Groq (cloud gpt-oss-120b) when an API key is set; else on-device Qwen.
+            val events = if (groq.hasKey()) {
+                groq.run(history = history, userText = text, confirm = { _, _ -> true })
+            } else {
+                agent.run(history = history, userText = text, confirm = { _, _ -> true })
+            }
+            events.collect { event ->
                 when (event) {
                     is AgentEvent.Token -> _streamingText.value = event.text
                     is AgentEvent.ToolCall -> {

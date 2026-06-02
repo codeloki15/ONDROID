@@ -23,7 +23,8 @@ data class SettingsUiState(
     val selectedSpeaker: Int = 0,
     val numSpeakers: Int = 0,
     val isPreviewPlaying: Boolean = false,
-    val previewingSpeakerId: Int? = null
+    val previewingSpeakerId: Int? = null,
+    val groqApiKey: String = ""
 )
 
 @HiltViewModel
@@ -83,6 +84,18 @@ class SettingsViewModel @Inject constructor(
             val count = voiceService.getNumSpeakers()
             _uiState.update { it.copy(numSpeakers = count) }
         }
+
+        // Load saved Groq API key
+        viewModelScope.launch {
+            settingsPreferences.groqApiKey.collect { key ->
+                _uiState.update { it.copy(groqApiKey = key) }
+            }
+        }
+    }
+
+    fun setGroqApiKey(key: String) {
+        _uiState.update { it.copy(groqApiKey = key) }
+        settingsPreferences.saveGroqApiKey(key)
     }
 
     fun toggleAutoTts(enabled: Boolean) {

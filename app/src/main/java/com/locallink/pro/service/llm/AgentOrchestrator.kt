@@ -43,6 +43,7 @@ class AgentOrchestrator @Inject constructor(
         var transcript = QwenChatTemplate.buildPrompt(
             system = null, history = history, userTurn = userText, tools = tools,
         )
+        Log.d(TAG, "run: ${tools.size} tools, promptLen=${transcript.length}")
 
         var hop = 0
         while (hop < MAX_HOPS) {
@@ -51,6 +52,7 @@ class AgentOrchestrator @Inject constructor(
             val temp = if (tools.isEmpty()) CHAT_TEMPERATURE else TOOL_TEMPERATURE
             val raw = engine.generateRaw(transcript, temp).toList().joinToString("")
             val cleaned = QwenChatTemplate.cleanOutput(raw)
+            Log.d(TAG, "hop=$hop RAW OUTPUT: ${raw.take(500)}")
 
             when (val parsed = ToolCallParser.parse(raw)) {
                 is ParseResult.Text -> {

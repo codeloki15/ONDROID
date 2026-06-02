@@ -34,6 +34,9 @@ class SettingsPreferences(private val context: Context) {
         // Connection Settings
         private val KEY_AUTO_RECONNECT = booleanPreferencesKey("auto_reconnect")
         private val KEY_KEEP_ALIVE = booleanPreferencesKey("keep_alive")
+
+        // Groq (cloud LLM) API key
+        private val KEY_GROQ_API_KEY = stringPreferencesKey("groq_api_key")
     }
 
     // Application-scoped — survives ViewModel destruction
@@ -59,6 +62,21 @@ class SettingsPreferences(private val context: Context) {
             autoReconnect = prefs[KEY_AUTO_RECONNECT] ?: true,
             keepAlive = prefs[KEY_KEEP_ALIVE] ?: true
         )
+    }
+
+    // ─── Groq API key (cloud LLM) ───────────────────────────────────────────
+    val groqApiKey: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[KEY_GROQ_API_KEY] ?: ""
+    }
+
+    suspend fun loadGroqApiKey(): String = groqApiKey.first()
+
+    fun saveGroqApiKey(key: String) {
+        scope.launch {
+            withContext(NonCancellable) {
+                context.settingsDataStore.edit { it[KEY_GROQ_API_KEY] = key.trim() }
+            }
+        }
     }
 
     suspend fun load(): SavedSettings {

@@ -19,6 +19,19 @@ class ToolRegistry @Inject constructor(
 
     fun get(name: String): ToolHandler? = byName[name]
 
+    /** All tools as an OpenAI-style tools[] JSONArray (for Groq / OpenAI-compatible APIs). */
+    fun openAiToolsArray(): org.json.JSONArray {
+        val arr = org.json.JSONArray()
+        for (t in handlers()) {
+            val fn = JSONObject()
+                .put("name", t.name)
+                .put("description", t.description)
+                .put("parameters", JSONObject(t.parametersJson))
+            arr.put(JSONObject().put("type", "function").put("function", fn))
+        }
+        return arr
+    }
+
     fun requiresConfirmation(name: String): Boolean = byName[name]?.readOnly != true
 
     /** Execute a parsed call. Returns a result string; turns any failure into model-readable feedback. */

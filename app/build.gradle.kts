@@ -91,6 +91,9 @@ dependencies {
     // WorkManager (deferred reminders via schedule_reminder tool)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
+    // OkHttp — Groq (gpt-oss-120b) cloud chat + tool calling
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Core Android
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
