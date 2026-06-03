@@ -108,13 +108,25 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Speech-to-Text Settings
-            SettingsSection(title = "Speech-to-Text") {
+            SettingsSection(title = "Voice") {
                 SettingsToggle(
                     title = "Speech-to-Text",
                     subtitle = "Enable voice input via microphone",
                     icon = Icons.Default.Mic,
                     checked = uiState.sttEnabled,
                     onCheckedChange = viewModel::toggleSttEnabled
+                )
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                SettingsToggle(
+                    title = "Hands-free (Hey Omni)",
+                    subtitle = "Always listen for the wake word and reply by voice",
+                    icon = Icons.Default.RecordVoiceOver,
+                    checked = uiState.handsFree,
+                    onCheckedChange = { on ->
+                        viewModel.setHandsFree(on)
+                        if (on) com.locallink.pro.service.voice.VoiceLoopService.start(ctx)
+                        else com.locallink.pro.service.voice.VoiceLoopService.stop(ctx)
+                    }
                 )
             }
 

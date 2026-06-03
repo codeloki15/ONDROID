@@ -32,6 +32,10 @@ class ChatRepository @Inject constructor(
     private val _isAiResponding = MutableStateFlow(false)
     val isAiResponding: StateFlow<Boolean> = _isAiResponding.asStateFlow()
 
+    // Latest finished assistant reply text — used by the hands-free voice loop to speak it.
+    private val _lastAssistantReply = MutableStateFlow("")
+    val lastAssistantReply: StateFlow<String> = _lastAssistantReply.asStateFlow()
+
     fun observeSessions() = sessionDao.observeSessions()
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -103,6 +107,7 @@ class ChatRepository @Inject constructor(
                                 text = event.text, timestamp = System.currentTimeMillis(),
                             )
                         )
+                        _lastAssistantReply.value = event.text
                     }
                 }
             }

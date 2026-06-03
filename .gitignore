@@ -22,3 +22,4 @@ app/build/
 local.properties
 .DS_Store
 **/.DS_Store
+app/src/main/assets/kws/*.onnx

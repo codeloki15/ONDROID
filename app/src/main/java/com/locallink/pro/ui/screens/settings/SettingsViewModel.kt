@@ -26,6 +26,7 @@ data class SettingsUiState(
     val numSpeakers: Int = 0,
     val isPreviewPlaying: Boolean = false,
     val previewingSpeakerId: Int? = null,
+    val handsFree: Boolean = false,
     val apiKey: String = "",
     val selectedModel: String = SettingsPreferences.DEFAULT_MODEL,
     val models: List<OpenRouterModel> = emptyList(),
@@ -111,6 +112,10 @@ class SettingsViewModel @Inject constructor(
         // Populate the model list once (catalog is public, no key needed)
         fetchModels()
 
+        viewModelScope.launch {
+            settingsPreferences.handsFree.collect { h -> _uiState.update { it.copy(handsFree = h) } }
+        }
+
         // Composio settings
         viewModelScope.launch { settingsPreferences.composioApiKey.collect { k -> _uiState.update { it.copy(composioApiKey = k) } } }
         viewModelScope.launch { settingsPreferences.composioUserId.collect { u -> _uiState.update { it.copy(composioUserId = u) } } }
@@ -177,6 +182,11 @@ class SettingsViewModel @Inject constructor(
 
     fun toggleSttEnabled(enabled: Boolean) {
         voiceService.setSttEnabled(enabled)
+    }
+
+    fun setHandsFree(enabled: Boolean) {
+        _uiState.update { it.copy(handsFree = enabled) }
+        settingsPreferences.setHandsFree(enabled)
     }
 
     fun clearAllChats() {

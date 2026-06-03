@@ -40,6 +40,9 @@ class SettingsPreferences(private val context: Context) {
         private val KEY_OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
         const val DEFAULT_MODEL = "openai/gpt-oss-120b"
 
+        // Hands-free (wake-word) mode
+        private val KEY_HANDS_FREE = booleanPreferencesKey("hands_free_enabled")
+
         // Composio (cloud SaaS tools, opt-in beta) — BYO project key
         private val KEY_COMPOSIO_API_KEY = stringPreferencesKey("composio_api_key")
         private val KEY_COMPOSIO_USER_ID = stringPreferencesKey("composio_user_id")
@@ -105,6 +108,10 @@ class SettingsPreferences(private val context: Context) {
     val composioApiKey: Flow<String> = context.settingsDataStore.data.map { it[KEY_COMPOSIO_API_KEY] ?: "" }
     val composioUserId: Flow<String> = context.settingsDataStore.data.map { it[KEY_COMPOSIO_USER_ID] ?: "default" }
     val composioTools: Flow<String> = context.settingsDataStore.data.map { it[KEY_COMPOSIO_TOOLS] ?: DEFAULT_COMPOSIO_TOOLS }
+
+    val handsFree: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_HANDS_FREE] ?: false }
+    suspend fun loadHandsFree(): Boolean = handsFree.first()
+    fun setHandsFree(enabled: Boolean) = editAsync { it[KEY_HANDS_FREE] = enabled }
 
     suspend fun loadComposioApiKey(): String = composioApiKey.first()
     suspend fun loadComposioUserId(): String = composioUserId.first()
