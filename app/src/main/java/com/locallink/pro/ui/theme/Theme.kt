@@ -1,167 +1,94 @@
 package com.locallink.pro.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// ─── Extended OmniPin Colors ────────────────────────────────────────
+// ─── Extended OmniPin colors (accessible via LocalOmniPinColors) ─────────
 
 data class OmniPinColors(
     val userBubble: Color = OmniUserBubble,
+    val aiBubble: Color = OmniAiBubble,
     val border: Color = OmniBorder,
-    val borderLight: Color = OmniBorderLight,
+    val borderLight: Color = OmniBorderSoft,
     val borderFocus: Color = OmniBorderFocus,
-    val textTertiary: Color = OmniTextTertiary,
-    val toolSuccess: Color = OmniToolSuccess,
-    val toolSuccessBg: Color = OmniToolSuccessBg,
-    val statusConnected: Color = OmniStatusConnected,
-    val statusDisconnected: Color = OmniStatusDisconnected,
-    val statusConnecting: Color = OmniStatusConnecting,
-    val surfaceElevated: Color = OmniSurfaceElevated,
-    val surfaceDim: Color = OmniSurfaceDim,
+    val textTertiary: Color = OmniTextFaint,
+    val toolSuccess: Color = OmniSuccess,
+    val toolSuccessBg: Color = OmniSuccessDim,
+    val statusConnected: Color = OmniSuccess,
+    val statusDisconnected: Color = OmniError,
+    val statusConnecting: Color = OmniWarning,
+    val surfaceElevated: Color = OmniSurface2,
+    val surfaceDim: Color = OmniSurface3,
     val accent: Color = OmniAccent,
-    val accentLight: Color = OmniAccentLight,
+    val accentLight: Color = OmniAccentContainer,
 )
 
 val LocalOmniPinColors = staticCompositionLocalOf { OmniPinColors() }
 
-// ─── OmniPin Light Color Scheme ─────────────────────────────────────
+// ─── Graphite (dark) Material color scheme ───────────────────────────────
 
-private val OmniPinLightScheme = lightColorScheme(
-    primary = OmniPrimary,
-    onPrimary = OmniTextOnDark,
-    primaryContainer = OmniPrimaryContainer,
-    onPrimaryContainer = OmniTextPrimary,
-    secondary = OmniAccent,
-    onSecondary = OmniTextOnDark,
-    secondaryContainer = OmniAccentLight,
-    onSecondaryContainer = OmniAccent,
-    background = OmniBackground,
-    onBackground = OmniTextPrimary,
+private val GraphiteScheme = darkColorScheme(
+    primary = OmniAccent,
+    onPrimary = OmniTextOnAccent,
+    primaryContainer = OmniAccentContainer,
+    onPrimaryContainer = OmniAccentBright,
+    secondary = OmniAccentBright,
+    onSecondary = OmniTextOnAccent,
+    secondaryContainer = OmniSurface3,
+    onSecondaryContainer = OmniText,
+    background = OmniBg,
+    onBackground = OmniText,
     surface = OmniSurface,
-    onSurface = OmniTextPrimary,
-    surfaceVariant = OmniSurfaceVariant,
-    onSurfaceVariant = OmniTextSecondary,
+    onSurface = OmniText,
+    surfaceVariant = OmniSurface2,
+    onSurfaceVariant = OmniTextDim,
+    surfaceContainer = OmniSurface2,
+    surfaceContainerHigh = OmniSurface3,
     outline = OmniBorder,
-    outlineVariant = OmniBorderLight,
-    error = OmniStatusError,
-    onError = OmniTextOnDark,
+    outlineVariant = OmniBorderSoft,
+    error = OmniError,
+    onError = OmniTextOnAccent,
+    errorContainer = OmniErrorDim,
+    onErrorContainer = OmniError,
+    scrim = OmniScrim,
 )
 
-// ─── Dark Color Scheme (kept from original) ─────────────────────────
-
-private val DarkColorScheme = darkColorScheme(
-    primary = BluetoothBlue,
-    onPrimary = TextOnDark,
-    primaryContainer = BluetoothBlueDark,
-    secondary = SshGreen,
-    onSecondary = TextOnDark,
-    secondaryContainer = SshGreenDark,
-    background = SurfaceDark,
-    surface = SurfaceMediumDark,
-    surfaceVariant = SurfaceCardDark,
-    onBackground = TextPrimary,
-    onSurface = TextPrimary,
-    onSurfaceVariant = TextSecondary,
-    error = StatusError
-)
-
-// ─── Typography ─────────────────────────────────────────────────────
+// ─── Typography (refined; tight tracking on headings) ────────────────────
 
 private val OmniPinTypography = Typography(
-    titleLarge = TextStyle(
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp,
-        lineHeight = 28.sp,
-        letterSpacing = (-0.2).sp,
-    ),
-    titleMedium = TextStyle(
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 16.sp,
-        lineHeight = 22.sp,
-    ),
-    titleSmall = TextStyle(
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
-    ),
-    bodyLarge = TextStyle(
-        fontWeight = FontWeight.Normal,
-        fontSize = 15.sp,
-        lineHeight = 22.sp,
-    ),
-    bodyMedium = TextStyle(
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
-    ),
-    bodySmall = TextStyle(
-        fontWeight = FontWeight.Normal,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
-    ),
-    labelLarge = TextStyle(
-        fontWeight = FontWeight.Medium,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
-    ),
-    labelMedium = TextStyle(
-        fontWeight = FontWeight.Medium,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
-    ),
-    labelSmall = TextStyle(
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 14.sp,
-    ),
+    headlineMedium = TextStyle(fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 32.sp, letterSpacing = (-0.5).sp),
+    titleLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp, letterSpacing = (-0.3).sp),
+    titleMedium = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp, letterSpacing = (-0.1).sp),
+    titleSmall = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp),
+    bodyLarge = TextStyle(fontWeight = FontWeight.Normal, fontSize = 15.5.sp, lineHeight = 23.sp),
+    bodyMedium = TextStyle(fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp),
+    bodySmall = TextStyle(fontWeight = FontWeight.Normal, fontSize = 12.5.sp, lineHeight = 17.sp),
+    labelLarge = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 18.sp, letterSpacing = 0.1.sp),
+    labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp),
+    labelSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.4.sp),
 )
 
-// ─── Theme Composable ───────────────────────────────────────────────
+// ─── Theme (always dark Graphite) ────────────────────────────────────────
 
 @Composable
 fun LocalLinkProTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false,
+    darkTheme: Boolean = true,        // OmniPin is dark-themed
+    dynamicColor: Boolean = false,    // keep our identity, ignore Material You
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context)
-            else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> OmniPinLightScheme
-    }
-
-    val omniColors = if (darkTheme) {
-        OmniPinColors(
-            userBubble = BluetoothBlue,
-            border = SurfaceCardDark,
-            borderLight = SurfaceMediumDark,
-            borderFocus = TextSecondary,
-            textTertiary = TextSecondary,
-            surfaceElevated = SurfaceCardDark,
-            surfaceDim = SurfaceMediumDark,
-        )
-    } else {
-        OmniPinColors()
-    }
-
-    CompositionLocalProvider(LocalOmniPinColors provides omniColors) {
+    CompositionLocalProvider(LocalOmniPinColors provides OmniPinColors()) {
         MaterialTheme(
-            colorScheme = colorScheme,
+            colorScheme = GraphiteScheme,
             typography = OmniPinTypography,
-            content = content
+            content = content,
         )
     }
 }

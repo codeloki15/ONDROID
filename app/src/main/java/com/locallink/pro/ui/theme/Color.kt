@@ -2,93 +2,84 @@ package com.locallink.pro.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// ─── OmniPin Clean Light Palette ─────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// OmniPin — Modern Dark design system ("Graphite")
+// A refined, premium AI-chat palette: near-black graphite surfaces, a single
+// warm-violet accent, restrained semantic colors. Familiar (ChatGPT/Claude)
+// but with its own cohesive identity.
+// ─────────────────────────────────────────────────────────────────────────
 
-// Primary - Dark charcoal (used for primary actions, user bubbles)
-val OmniPrimary = Color(0xFF2D2D2D)
-val OmniPrimaryLight = Color(0xFF4A4A4A)
-val OmniPrimaryContainer = Color(0xFFF0F0F0)
+// Surfaces — layered near-black graphite (each step ~+4% lightness)
+val OmniBg          = Color(0xFF0B0B0F) // app background (deepest)
+val OmniSurface     = Color(0xFF141419) // cards / sheets
+val OmniSurface2    = Color(0xFF1C1C23) // elevated card / input field
+val OmniSurface3    = Color(0xFF26262F) // hover / pressed / chips
+val OmniScrim       = Color(0xCC000000)
 
-// Surfaces - White-dominant, ultra-clean
-val OmniBackground = Color(0xFFFFFFFF)
-val OmniSurface = Color(0xFFFFFFFF)
-val OmniSurfaceVariant = Color(0xFFF7F7F8)
-val OmniSurfaceElevated = Color(0xFFFAFAFB)
-val OmniSurfaceDim = Color(0xFFF2F2F3)
-
-// Borders
-val OmniBorder = Color(0xFFE5E5E7)
-val OmniBorderLight = Color(0xFFEEEEF0)
-val OmniBorderFocus = Color(0xFFD0D0D5)
+// Borders / hairlines
+val OmniBorder      = Color(0xFF2A2A33)
+val OmniBorderSoft  = Color(0xFF1F1F26)
+val OmniBorderFocus = Color(0xFF3A3A46)
 
 // Text
-val OmniTextPrimary = Color(0xFF1A1A1A)
-val OmniTextSecondary = Color(0xFF6B6B6B)
-val OmniTextTertiary = Color(0xFF999999)
-val OmniTextOnDark = Color(0xFFFFFFFF)
-val OmniTextOnDarkSecondary = Color(0xFFE0E0E0)
+val OmniText        = Color(0xFFF2F2F5) // primary
+val OmniTextDim     = Color(0xFFA8A8B3) // secondary
+val OmniTextFaint   = Color(0xFF6E6E7A) // tertiary / placeholders
+val OmniTextOnAccent = Color(0xFF0B0B0F)
+
+// Accent — warm violet (single hero accent + soft container)
+val OmniAccent      = Color(0xFF7C6CFF)
+val OmniAccentBright = Color(0xFF9A8CFF)
+val OmniAccentDim   = Color(0xFF5B4FD6)
+val OmniAccentContainer = Color(0xFF1E1A3A) // accent-tinted surface
 
 // Chat bubbles
-val OmniUserBubble = Color(0xFF2D2D2D)
+val OmniUserBubble  = Color(0xFF2A2540) // subtle violet-tinted graphite (user)
+val OmniAiBubble    = Color(0xFF16161C) // near-surface (assistant)
 
-// Status indicators
-val OmniStatusConnected = Color(0xFF22C55E)
-val OmniStatusDisconnected = Color(0xFFEF4444)
-val OmniStatusConnecting = Color(0xFFF59E0B)
-val OmniStatusError = Color(0xFFEF4444)
+// Semantic
+val OmniSuccess     = Color(0xFF3DD68C)
+val OmniSuccessDim  = Color(0xFF143324)
+val OmniWarning     = Color(0xFFF5B14B)
+val OmniError       = Color(0xFFFF6B6B)
+val OmniErrorDim    = Color(0xFF3A1A1F)
 
-// Tool/Action badges
-val OmniToolSuccess = Color(0xFF22C55E)
-val OmniToolSuccessBg = Color(0xFFDCFCE7)
+// Voice / live
+val OmniVoice       = Color(0xFFFF6B6B)
+val OmniVoicePulse  = Color(0x33FF6B6B)
 
-// Accent
-val OmniAccent = Color(0xFF3B82F6)
-val OmniAccentLight = Color(0xFFDBEAFE)
+// ─── Back-compat aliases (older screens reference these names) ───────────
+val OmniBackground       = OmniBg
+val OmniSurfaceVariant   = OmniSurface2
+val OmniSurfaceElevated  = OmniSurface2
+val OmniSurfaceDim       = OmniSurface3
+val OmniBorderLight      = OmniBorderSoft
+val OmniPrimary          = OmniAccent
+val OmniPrimaryLight     = OmniAccentBright
+val OmniPrimaryContainer = OmniAccentContainer
+val OmniTextPrimary      = OmniText
+val OmniTextSecondary    = OmniTextDim
+val OmniTextTertiary     = OmniTextFaint
+val OmniTextOnDark       = OmniText
+val OmniTextOnDarkSecondary = OmniTextDim
+val OmniAccentLight      = OmniAccentContainer
+val OmniStatusConnected    = OmniSuccess
+val OmniStatusDisconnected = OmniError
+val OmniStatusConnecting   = OmniWarning
+val OmniStatusError        = OmniError
+val OmniToolSuccess        = OmniSuccess
+val OmniToolSuccessBg      = OmniSuccessDim
+val VoiceActive            = OmniVoice
+val VoicePulse             = OmniVoicePulse
 
-// Voice
-val VoiceActive = Color(0xFFFF6B6B)
-val VoicePulse = Color(0x40FF6B6B)
-
-// ─── Legacy colors (kept for dark theme + specialized screens) ───────
-
-// Primary - Deep Blue (Bluetooth indicator)
-val BluetoothBlue = Color(0xFF2A5CAA)
-val BluetoothBlueLight = Color(0xFF5B8BD5)
-val BluetoothBlueDark = Color(0xFF1A3D72)
-
-// Secondary - Green (SSH/WebSocket indicator)
-val SshGreen = Color(0xFF2E7D32)
-val SshGreenLight = Color(0xFF60AD5E)
-val SshGreenDark = Color(0xFF005005)
-
-// Dark theme surfaces
-val SurfaceDark = Color(0xFF0F1419)
-val SurfaceMediumDark = Color(0xFF1A1F2E)
-val SurfaceCardDark = Color(0xFF222836)
-
-// Dark theme text
-val TextPrimary = Color(0xFFE8EAED)
-val TextSecondary = Color(0xFF9AA0A6)
-val TextOnDark = Color(0xFFFFFFFF)
-
-// Status (legacy aliases)
-val StatusConnected = OmniStatusConnected
-val StatusDisconnected = OmniStatusDisconnected
-val StatusConnecting = OmniStatusConnecting
-val StatusError = OmniStatusError
-
-// Terminal
-val TerminalGreen = Color(0xFF4EC9B0)
-val TerminalBg = Color(0xFF1E1E1E)
-
-// Git status
-val GitAdded = Color(0xFF73C991)
-val GitModified = Color(0xFFE2C08D)
-val GitDeleted = Color(0xFFF14C4C)
-val GitUntracked = Color(0xFF858585)
-
-// File types
-val FileFolder = Color(0xFFDCB67A)
-val FileCode = Color(0xFF519ABA)
-val FileImage = Color(0xFFA074C4)
-val FileDocument = Color(0xFF6997D5)
+// Legacy names still referenced by theme/specialized code
+val TextPrimary   = OmniText
+val TextSecondary = OmniTextDim
+val TextOnDark    = OmniText
+val SurfaceDark        = OmniBg
+val SurfaceMediumDark  = OmniSurface
+val SurfaceCardDark    = OmniSurface2
+val StatusConnected    = OmniSuccess
+val StatusDisconnected = OmniError
+val StatusConnecting   = OmniWarning
+val StatusError        = OmniError

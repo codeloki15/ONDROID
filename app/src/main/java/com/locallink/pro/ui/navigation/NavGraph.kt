@@ -7,6 +7,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.locallink.pro.ui.screens.chat.ChatScreen
+import com.locallink.pro.ui.screens.connect.ConnectScreen
 import com.locallink.pro.ui.screens.model.ModelGateScreen
 import com.locallink.pro.ui.screens.sessions.SessionsScreen
 import com.locallink.pro.ui.screens.settings.SettingsScreen
@@ -16,6 +17,7 @@ object Routes {
     const val SESSIONS = "sessions"
     const val CHAT = "chat"            // chat?sessionId={id}
     const val SETTINGS = "settings"
+    const val CONNECT = "connect"
 }
 
 @Composable
@@ -45,7 +47,13 @@ fun LocalLinkNavGraph(navController: NavHostController) {
             )
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onManageApps = { navController.navigate(Routes.CONNECT) },
+            )
+        }
+        composable(Routes.CONNECT) {
+            ConnectScreen(onBack = { navController.popBackStack() })
         }
     }
 }

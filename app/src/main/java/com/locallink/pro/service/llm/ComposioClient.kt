@@ -33,6 +33,10 @@ class ComposioClient @Inject constructor(
         private const val BASE = "https://backend.composio.dev"
         private const val LIST_URL = "$BASE/api/v3.1/tools"
         private const val EXEC_URL = "$BASE/api/v3/tools/execute"
+        private const val TOOLKITS_URL = "$BASE/api/v3/toolkits"
+        private const val AUTHCFG_URL = "$BASE/api/v3/auth_configs"
+        private const val CONN_URL = "$BASE/api/v3/connected_accounts"
+        const val CALLBACK_URL = "omnipin://composio/callback"
     }
 
     private val json = "application/json; charset=utf-8".toMediaType()
@@ -127,4 +131,121 @@ class ComposioClient @Inject constructor(
             JSONObject().put("error", "Composio error: ${e.message}").toString()
         }
     }
+
+    // ─── Connect flow (browse apps → OAuth → Connected ✓) ────────────────
+
+    private fun get(url: String, key: String): Pair<Int, String> {
+        val req = Request.Builder().url(url).addHeader("x-api-key", key).get().build()
+        http.newCall(req).execute().use { return it.code to (it.body?.string() ?: "") }
+    }
+
+    private fun post(url: String, key: String, body: JSONObject): Pair<Int, String> {
+        val req = Request.Builder().url(url).addHeader("x-api-key", key)
+            .post(body.toString().toRequestBody(json)).build()
+        http.newCall(req).execute().use { return it.code to (it.body?.string() ?: "") }
+    }
+
+    /** Browse connectable apps (Composio-managed OAuth), with which are already connected for the user. */
+    suspend fun listApps(search: String = ""): Result<List<ComposioApp>> = withContext(Dispatchers.IO) {
+        val key = settings.loadComposioApiKey()
+        if (key.isBlank()) return@withContext Result.failure(Exception("Set a Composio API key first"))
+        try {
+            val q = if (search.isBlank()) "" else "&search=${java.net.URLEncoder.encode(search, "UTF-8")}"
+            val (code, text) = get("$TOOLKITS_URL?managed_by=composio&sort_by=usage&limit=60$q", key)
+            if (code != 200) return@withContext Result.failure(Exception("Toolkits HTTP $code"))
+            val items = JSONObject(text).optJSONArray("items") ?: JSONArray()
+
+            // Which toolkits are already ACTIVE for this user
+            val userId = settings.loadComposioUserId()
+            val connected = mutableSetOf<String>()
+            runCatching {
+                val (c2, t2) = get("$CONN_URL?user_ids=$userId&statuses=ACTIVE&limit=100", key)
+                if (c2 == 200) {
+                    val arr = JSONObject(t2).optJSONArray("items") ?: JSONArray()
+                    for (i in 0 until arr.length())
+                        arr.getJSONObject(i).optJSONObject("toolkit")?.optString("slug")?.let { connected += it }
+                }
+            }
+
+            val out = ArrayList<ComposioApp>()
+            for (i in 0 until items.length()) {
+                val it = items.getJSONObject(i)
+                val managed = it.optJSONArray("composio_managed_auth_schemes")?.length() ?: 0
+                if (managed == 0 && !it.optBoolean("no_auth")) continue // only one-tap-connectable apps
+                val slug = it.optString("slug")
+                out += ComposioApp(
+                    slug = slug,
+                    name = it.optString("name", slug),
+                    logo = it.optJSONObject("meta")?.optString("logo") ?: "",
+                    toolsCount = it.optJSONObject("meta")?.optInt("tools_count") ?: 0,
+                    connected = slug in connected,
+                )
+            }
+            Result.success(out)
+        } catch (e: Exception) {
+            Log.e(TAG, "listApps failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /** Ensure a Composio-managed auth config exists for the toolkit; returns its id. */
+    private fun ensureAuthConfig(slug: String, key: String): String? {
+        runCatching {
+            val (c, t) = get("$AUTHCFG_URL?toolkit_slug=$slug&is_composio_managed=true&limit=1", key)
+            if (c == 200) JSONObject(t).optJSONArray("items")?.optJSONObject(0)?.optString("id")
+                ?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+        val body = JSONObject().put("toolkit", JSONObject().put("slug", slug)).put(
+            "auth_config", JSONObject().put("type", "use_composio_managed_auth").put("name", slug)
+        )
+        val (c, t) = post(AUTHCFG_URL, key, body)
+        if (c !in 200..201) { Log.e(TAG, "authConfig $slug HTTP $c: ${t.take(160)}"); return null }
+        return JSONObject(t).optJSONObject("auth_config")?.optString("id")
+    }
+
+    /** Start OAuth for an app; returns (connectedAccountId, redirectUrl) to open in a Custom Tab. */
+    suspend fun initiateConnect(slug: String): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
+        val key = settings.loadComposioApiKey()
+        if (key.isBlank()) return@withContext Result.failure(Exception("Set a Composio API key first"))
+        try {
+            val acId = ensureAuthConfig(slug, key)
+                ?: return@withContext Result.failure(Exception("Couldn't set up auth for $slug"))
+            val userId = settings.loadComposioUserId()
+            val body = JSONObject()
+                .put("auth_config", JSONObject().put("id", acId))
+                .put("connection", JSONObject().put("user_id", userId).put("callback_url", CALLBACK_URL))
+            val (c, t) = post(CONN_URL, key, body)
+            if (c !in 200..201) return@withContext Result.failure(Exception("Connect HTTP $c"))
+            val o = JSONObject(t)
+            val caId = o.optString("id")
+            val redirect = o.optJSONObject("connectionData")?.optJSONObject("val")?.optString("redirect_url")
+                ?: o.optString("redirect_url")
+            if (redirect.isNullOrBlank()) return@withContext Result.failure(Exception("No OAuth URL returned"))
+            // a fresh listApps()/schemas() will pick up the new tools after connection
+            cachedSchemas = null
+            Result.success(caId to redirect)
+        } catch (e: Exception) {
+            Log.e(TAG, "initiateConnect failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /** True once the given connected-account id reaches ACTIVE. */
+    suspend fun isConnected(caId: String): Boolean = withContext(Dispatchers.IO) {
+        val key = settings.loadComposioApiKey()
+        if (key.isBlank()) return@withContext false
+        runCatching {
+            val (c, t) = get("$CONN_URL/$caId", key)
+            if (c == 200) JSONObject(t).optString("status") == "ACTIVE" else false
+        }.getOrDefault(false)
+    }
 }
+
+/** One connectable app for the connect grid. */
+data class ComposioApp(
+    val slug: String,
+    val name: String,
+    val logo: String,
+    val toolsCount: Int,
+    val connected: Boolean,
+)

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.collectLatest
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onManageApps: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -261,6 +262,16 @@ fun SettingsScreen(
                     color = OmniTextSecondary,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onManageApps,
+                    enabled = uiState.composioApiKey.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Apps, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Manage connected apps")
+                }
             }
 
             // Data
