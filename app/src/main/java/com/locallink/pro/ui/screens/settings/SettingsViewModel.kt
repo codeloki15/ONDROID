@@ -32,6 +32,10 @@ data class SettingsUiState(
     val loadingModels: Boolean = false,
     val modelsError: String? = null,
     val freeOnly: Boolean = false,
+    // Composio (cloud SaaS tools, beta)
+    val composioApiKey: String = "",
+    val composioUserId: String = "default",
+    val composioTools: String = SettingsPreferences.DEFAULT_COMPOSIO_TOOLS,
 )
 
 @HiltViewModel
@@ -106,6 +110,26 @@ class SettingsViewModel @Inject constructor(
         }
         // Populate the model list once (catalog is public, no key needed)
         fetchModels()
+
+        // Composio settings
+        viewModelScope.launch { settingsPreferences.composioApiKey.collect { k -> _uiState.update { it.copy(composioApiKey = k) } } }
+        viewModelScope.launch { settingsPreferences.composioUserId.collect { u -> _uiState.update { it.copy(composioUserId = u) } } }
+        viewModelScope.launch { settingsPreferences.composioTools.collect { t -> _uiState.update { it.copy(composioTools = t) } } }
+    }
+
+    fun setComposioApiKey(key: String) {
+        _uiState.update { it.copy(composioApiKey = key) }
+        settingsPreferences.saveComposioApiKey(key)
+    }
+
+    fun setComposioUserId(id: String) {
+        _uiState.update { it.copy(composioUserId = id) }
+        settingsPreferences.saveComposioUserId(id)
+    }
+
+    fun setComposioTools(slugs: String) {
+        _uiState.update { it.copy(composioTools = slugs) }
+        settingsPreferences.saveComposioTools(slugs)
     }
 
     fun setApiKey(key: String) {

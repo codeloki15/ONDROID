@@ -39,6 +39,13 @@ class SettingsPreferences(private val context: Context) {
         private val KEY_OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
         private val KEY_OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
         const val DEFAULT_MODEL = "openai/gpt-oss-120b"
+
+        // Composio (cloud SaaS tools, opt-in beta) — BYO project key
+        private val KEY_COMPOSIO_API_KEY = stringPreferencesKey("composio_api_key")
+        private val KEY_COMPOSIO_USER_ID = stringPreferencesKey("composio_user_id")
+        private val KEY_COMPOSIO_TOOLS = stringPreferencesKey("composio_tool_slugs")
+        // Sensible scoped defaults (comma-separated). Keep small to bound the prompt.
+        const val DEFAULT_COMPOSIO_TOOLS = "GMAIL_SEND_EMAIL,GMAIL_FETCH_EMAILS,SLACK_SEND_MESSAGE"
     }
 
     // Application-scoped — survives ViewModel destruction
@@ -92,6 +99,23 @@ class SettingsPreferences(private val context: Context) {
                 context.settingsDataStore.edit { it[KEY_OPENROUTER_MODEL] = model.trim() }
             }
         }
+    }
+
+    // ─── Composio (cloud SaaS tools, opt-in beta) ───────────────────────────
+    val composioApiKey: Flow<String> = context.settingsDataStore.data.map { it[KEY_COMPOSIO_API_KEY] ?: "" }
+    val composioUserId: Flow<String> = context.settingsDataStore.data.map { it[KEY_COMPOSIO_USER_ID] ?: "default" }
+    val composioTools: Flow<String> = context.settingsDataStore.data.map { it[KEY_COMPOSIO_TOOLS] ?: DEFAULT_COMPOSIO_TOOLS }
+
+    suspend fun loadComposioApiKey(): String = composioApiKey.first()
+    suspend fun loadComposioUserId(): String = composioUserId.first()
+    suspend fun loadComposioTools(): String = composioTools.first()
+
+    fun saveComposioApiKey(key: String) = editAsync { it[KEY_COMPOSIO_API_KEY] = key.trim() }
+    fun saveComposioUserId(id: String) = editAsync { it[KEY_COMPOSIO_USER_ID] = id.trim().ifBlank { "default" } }
+    fun saveComposioTools(slugs: String) = editAsync { it[KEY_COMPOSIO_TOOLS] = slugs.trim() }
+
+    private fun editAsync(block: (MutablePreferences) -> Unit) {
+        scope.launch { withContext(NonCancellable) { context.settingsDataStore.edit(block) } }
     }
 
     suspend fun load(): SavedSettings {

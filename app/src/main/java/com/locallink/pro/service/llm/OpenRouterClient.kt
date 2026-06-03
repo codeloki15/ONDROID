@@ -2,8 +2,6 @@ package com.locallink.pro.service.llm
 
 import android.util.Log
 import com.locallink.pro.data.local.SettingsPreferences
-import com.locallink.pro.service.llm.tools.ToolCall
-import com.locallink.pro.service.llm.tools.ToolRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -35,7 +33,7 @@ data class OpenRouterModel(
  */
 @Singleton
 class OpenRouterClient @Inject constructor(
-    private val registry: ToolRegistry,
+    private val router: ToolRouter,
     private val settings: SettingsPreferences,
 ) {
     companion object {
@@ -122,7 +120,7 @@ class OpenRouterClient @Inject constructor(
         }
         messages.put(JSONObject().put("role", "user").put("content", userText))
 
-        val tools = registry.openAiToolsArray()
+        val tools = router.schemas()
 
         var hop = 0
         while (hop < MAX_HOPS) {
@@ -155,11 +153,11 @@ class OpenRouterClient @Inject constructor(
                 val name = fn.optString("name")
                 val args = try { JSONObject(fn.optString("arguments", "{}")) } catch (_: Exception) { JSONObject() }
 
-                val readOnly = !registry.requiresConfirmation(name)
+                val readOnly = !router.requiresConfirmation(name)
                 emit(AgentEvent.ToolCall(id, name, args.toString(), readOnly))
 
                 val result = if (readOnly || confirm(name, args.toString())) {
-                    registry.execute(ToolCall(name, args))
+                    router.execute(name, args)
                 } else {
                     JSONObject().put("error", "User declined to run $name").toString()
                 }

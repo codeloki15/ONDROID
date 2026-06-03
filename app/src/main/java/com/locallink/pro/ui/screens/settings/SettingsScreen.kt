@@ -219,6 +219,50 @@ fun SettingsScreen(
                 )
             }
 
+            // Connected Apps — Composio (cloud SaaS tools, beta)
+            SettingsSection(title = "Connected Apps (beta)") {
+                Text(
+                    "Add your Composio API key to let the assistant act in cloud apps (Gmail, Slack, " +
+                        "GitHub…) alongside on-device tools. Connect accounts at app.composio.dev. " +
+                        "Note: this is a project-wide key — only use your own.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OmniTextSecondary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                OutlinedTextField(
+                    value = uiState.composioApiKey,
+                    onValueChange = viewModel::setComposioApiKey,
+                    label = { Text("Composio API key") },
+                    placeholder = { Text("comp_...") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = uiState.composioUserId,
+                    onValueChange = viewModel::setComposioUserId,
+                    label = { Text("Composio user id") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = uiState.composioTools,
+                    onValueChange = viewModel::setComposioTools,
+                    label = { Text("Enabled tool slugs (comma-separated)") },
+                    placeholder = { Text("GMAIL_SEND_EMAIL,SLACK_SEND_MESSAGE") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    if (uiState.composioApiKey.isBlank()) "Disabled (no key)"
+                    else "Enabled — cloud tools added to the assistant",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = OmniTextSecondary,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+
             // Data
             SettingsSection(title = "Data") {
                 SettingsToggle(
