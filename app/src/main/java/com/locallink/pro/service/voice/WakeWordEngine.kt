@@ -58,6 +58,9 @@ class WakeWordEngine @Inject constructor(
             featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
             modelConfig = modelConfig,
             keywordsFile = "$DIR/keywords.txt",
+            // More sensitive than defaults so a short phrase like "Hey Omni" triggers.
+            keywordsScore = 3.0f,       // boost keyword tokens
+            keywordsThreshold = 0.10f,  // lower = easier to fire (default ~0.25)
         )
         spotter = KeywordSpotter(assetManager = context.assets, config = config)
         Log.d(TAG, "KeywordSpotter ready")
@@ -93,10 +96,12 @@ class WakeWordEngine @Inject constructor(
         worker = thread(name = "wakeword", isDaemon = true) {
             val buf = ShortArray(minBuf)
             val floats = FloatArray(minBuf)
+            var reads = 0L
             try {
                 while (running) {
                     val n = ar.read(buf, 0, buf.size)
                     if (n <= 0) continue
+                    if (++reads % 20L == 0L) Log.d(TAG, "listening… ($reads reads)")
                     for (i in 0 until n) floats[i] = buf[i] / 32768f
                     stream.acceptWaveform(floats.copyOf(n), SAMPLE_RATE)
                     while (sp.isReady(stream)) {
