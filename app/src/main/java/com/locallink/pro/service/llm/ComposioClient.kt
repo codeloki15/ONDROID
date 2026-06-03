@@ -221,9 +221,21 @@ class ComposioClient @Inject constructor(
             if (c !in 200..201) return@withContext Result.failure(Exception("Connect HTTP $c"))
             val o = JSONObject(t)
             val caId = o.optString("id")
-            val redirect = o.optJSONObject("connectionData")?.optJSONObject("val")?.optString("redirect_url")
-                ?: o.optString("redirect_url")
-            if (redirect.isNullOrBlank()) return@withContext Result.failure(Exception("No OAuth URL returned"))
+            // The OAuth URL appears under several key names depending on API version:
+            // connectionData.val.redirectUrl (camelCase) or .redirect_url, plus top-level
+            // redirect_url / redirect_uri. optString returns "" (not null) for missing keys,
+            // so pick the first non-blank explicitly.
+            val valObj = o.optJSONObject("connectionData")?.optJSONObject("val")
+            val redirect = listOfNotNull(
+                valObj?.optString("redirectUrl"),
+                valObj?.optString("redirect_url"),
+                o.optString("redirect_url"),
+                o.optString("redirect_uri"),
+            ).firstOrNull { it.isNotBlank() }
+            if (redirect.isNullOrBlank()) {
+                Log.e(TAG, "no redirect in response: ${t.take(300)}")
+                return@withContext Result.failure(Exception("No OAuth URL returned"))
+            }
             // a fresh listApps()/schemas() will pick up the new tools after connection
             cachedSchemas = null
             Result.success(caId to redirect)
