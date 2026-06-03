@@ -46,7 +46,11 @@ class MainActivity : ComponentActivity() {
     private fun requestPermissions() {
         val permissions = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.CAMERA
+            Manifest.permission.CAMERA,
+            // On-device tool permissions (calendar/contacts read, phone calls)
+            Manifest.permission.READ_CALENDAR,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.CALL_PHONE,
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
