@@ -152,7 +152,10 @@ class ComposioClient @Inject constructor(
         try {
             val q = if (search.isBlank()) "" else "&search=${java.net.URLEncoder.encode(search, "UTF-8")}"
             val (code, text) = get("$TOOLKITS_URL?managed_by=composio&sort_by=usage&limit=60$q", key)
-            if (code != 200) return@withContext Result.failure(Exception("Toolkits HTTP $code"))
+            if (code == 401) return@withContext Result.failure(
+                Exception("Invalid Composio API key. Get a valid key from app.composio.dev → API Keys and paste it in Settings.")
+            )
+            if (code != 200) return@withContext Result.failure(Exception("Couldn't load apps (HTTP $code)"))
             val items = JSONObject(text).optJSONArray("items") ?: JSONArray()
 
             // Which toolkits are already ACTIVE for this user
