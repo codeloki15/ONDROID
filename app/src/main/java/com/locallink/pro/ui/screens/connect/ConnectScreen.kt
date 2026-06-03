@@ -130,8 +130,12 @@ private fun AppCard(app: ComposioApp, connecting: Boolean, onClick: () -> Unit) 
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(OmniSurface)
-            .border(1.dp, if (app.connected) OmniSuccess.copy(alpha = 0.4f) else OmniBorder, RoundedCornerShape(18.dp))
-            .clickable(enabled = !app.connected && !connecting, onClick = onClick)
+            .border(
+                1.dp,
+                if (app.connected || app.noAuth) OmniSuccess.copy(alpha = 0.4f) else OmniBorder,
+                RoundedCornerShape(18.dp),
+            )
+            .clickable(enabled = !app.connected && !app.noAuth && !connecting, onClick = onClick)
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -139,26 +143,33 @@ private fun AppCard(app: ComposioApp, connecting: Boolean, onClick: () -> Unit) 
                 Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(OmniSurface3),
                 contentAlignment = Alignment.Center,
             ) {
+                // Letter fallback always behind; logo (white-on-dark) layered on top when it loads.
+                Text(app.name.take(1).uppercase(), color = OmniTextDim, style = MaterialTheme.typography.titleMedium)
                 if (app.logo.isNotBlank()) {
-                    AsyncImage(model = app.logo, contentDescription = null, modifier = Modifier.size(26.dp))
-                } else {
-                    Text(app.name.take(1).uppercase(), color = OmniText, style = MaterialTheme.typography.titleMedium)
+                    AsyncImage(
+                        model = app.logo, contentDescription = null,
+                        modifier = Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)),
+                    )
                 }
             }
             Spacer(Modifier.weight(1f))
             when {
-                app.connected -> Box(
+                app.connected || app.noAuth -> Box(
                     Modifier.size(24.dp).clip(CircleShape).background(OmniSuccess),
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Default.Check, "Connected", tint = OmniBg, modifier = Modifier.size(15.dp)) }
+                ) { Icon(Icons.Default.Check, "Ready", tint = OmniBg, modifier = Modifier.size(15.dp)) }
                 connecting -> CircularProgressIndicator(color = OmniAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
             }
         }
         Spacer(Modifier.height(12.dp))
         Text(app.name, color = OmniText, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
-            if (app.connected) "Connected" else "${app.toolsCount} tools",
-            color = if (app.connected) OmniSuccess else OmniTextFaint,
+            when {
+                app.noAuth -> "Ready · no login"
+                app.connected -> "Connected"
+                else -> "${app.toolsCount} tools · tap to connect"
+            },
+            color = if (app.connected || app.noAuth) OmniSuccess else OmniTextFaint,
             style = MaterialTheme.typography.labelSmall,
         )
     }

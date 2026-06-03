@@ -59,7 +59,7 @@ class ConnectViewModel @Inject constructor(
     }
 
     fun connect(app: ComposioApp) {
-        if (app.connected) return
+        if (app.connected || app.noAuth) return // no-auth toolkits need no connection
         viewModelScope.launch {
             _ui.update { it.copy(connectingSlug = app.slug, error = null) }
             composio.initiateConnect(app.slug).fold(

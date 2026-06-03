@@ -174,7 +174,8 @@ class ComposioClient @Inject constructor(
             for (i in 0 until items.length()) {
                 val it = items.getJSONObject(i)
                 val managed = it.optJSONArray("composio_managed_auth_schemes")?.length() ?: 0
-                if (managed == 0 && !it.optBoolean("no_auth")) continue // only one-tap-connectable apps
+                val noAuth = it.optBoolean("no_auth")
+                if (managed == 0 && !noAuth) continue // only one-tap-connectable or no-auth apps
                 val slug = it.optString("slug")
                 out += ComposioApp(
                     slug = slug,
@@ -182,6 +183,7 @@ class ComposioClient @Inject constructor(
                     logo = it.optJSONObject("meta")?.optString("logo") ?: "",
                     toolsCount = it.optJSONObject("meta")?.optInt("tools_count") ?: 0,
                     connected = slug in connected,
+                    noAuth = noAuth,
                 )
             }
             Result.success(out)
@@ -263,4 +265,5 @@ data class ComposioApp(
     val logo: String,
     val toolsCount: Int,
     val connected: Boolean,
+    val noAuth: Boolean = false, // works without connecting (e.g. the "composio" toolkit)
 )
