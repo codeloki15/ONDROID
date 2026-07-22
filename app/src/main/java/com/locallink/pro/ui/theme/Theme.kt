@@ -33,7 +33,7 @@ data class OmniPinColors(
 
 val LocalOmniPinColors = staticCompositionLocalOf { OmniPinColors() }
 
-// ─── Graphite (dark) Material color scheme ───────────────────────────────
+// ─── Amber Glass (dark) Material color scheme ────────────────────────────
 
 private val GraphiteScheme = darkColorScheme(
     primary = OmniAccent,

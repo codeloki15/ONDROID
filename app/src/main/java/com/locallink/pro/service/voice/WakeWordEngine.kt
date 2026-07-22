@@ -70,6 +70,15 @@ class WakeWordEngine @Inject constructor(
     @Synchronized
     fun start() {
         if (running) return
+        // Defensive: make sure no previous worker is still draining the mic before we open it
+        // again. Without this, a just-finished turn's thread can race the new one → mic contention.
+        worker?.let { old ->
+            if (old !== Thread.currentThread()) { try { old.join(800) } catch (_: InterruptedException) {} }
+        }
+        worker = null
+        try { record?.stop() } catch (_: Exception) {}
+        try { record?.release() } catch (_: Exception) {}
+        record = null
         try {
             ensureSpotter()
         } catch (e: Throwable) {
@@ -97,6 +106,7 @@ class WakeWordEngine @Inject constructor(
             val buf = ShortArray(minBuf)
             val floats = FloatArray(minBuf)
             var reads = 0L
+            var fired = false
             try {
                 while (running) {
                     val n = ar.read(buf, 0, buf.size)
@@ -110,26 +120,48 @@ class WakeWordEngine @Inject constructor(
                         if (kw.isNotEmpty()) {
                             Log.d(TAG, "wake detected: $kw")
                             sp.reset(stream)
-                            running = false
-                            onWake?.invoke()
+                            running = false   // exit the read loop; mic released in finally
+                            fired = true
                         }
                     }
                 }
             } catch (e: Throwable) {
                 Log.e(TAG, "wake loop error", e)
             } finally {
+                // This worker owns the mic — release it HERE so it's gone before STT starts.
+                // Do NOT take the instance lock here: stop()/start() may be holding it while
+                // join()-ing this very thread, which would deadlock. They null out `record`.
+                try { ar.stop() } catch (_: Exception) {}
+                try { ar.release() } catch (_: Exception) {}
                 try { stream.release() } catch (_: Exception) {}
+                // Notify only after the mic is fully released, so STT opens a free mic.
+                if (fired) onWake?.invoke()
             }
         }
     }
 
-    @Synchronized
+    /**
+     * Stop listening and BLOCK until the worker thread has exited and released the mic.
+     * Must be synchronous: STT/TTS grab the same mic immediately after, so a lingering
+     * AudioRecord here causes "No speech recognized" (mic contention).
+     */
     fun stop() {
-        running = false
-        worker = null
-        try { record?.stop() } catch (_: Exception) {}
-        try { record?.release() } catch (_: Exception) {}
-        record = null
+        val t: Thread?
+        synchronized(this) {
+            running = false
+            t = worker
+            worker = null
+        }
+        // Join OUTSIDE the lock (the worker's finally takes the lock to clear `record`).
+        if (t != null && t !== Thread.currentThread()) {
+            try { t.join(800) } catch (_: InterruptedException) {}
+        }
+        // Safety net if the worker never started/owned the record.
+        synchronized(this) {
+            try { record?.stop() } catch (_: Exception) {}
+            try { record?.release() } catch (_: Exception) {}
+            record = null
+        }
     }
 
     fun shutdown() {

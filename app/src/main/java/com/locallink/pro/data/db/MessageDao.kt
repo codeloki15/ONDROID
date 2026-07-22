@@ -18,4 +18,14 @@ interface MessageDao {
 
     @Query("DELETE FROM messages WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: String)
+
+    @Query("DELETE FROM messages WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    /** Trailing non-user rows (assistant/tool/system) after the last user turn — used to regenerate. */
+    @Query(
+        "DELETE FROM messages WHERE sessionId = :sessionId AND timestamp > " +
+            "(SELECT COALESCE(MAX(timestamp), 0) FROM messages WHERE sessionId = :sessionId AND role = 'user')"
+    )
+    suspend fun deleteAfterLastUser(sessionId: String)
 }

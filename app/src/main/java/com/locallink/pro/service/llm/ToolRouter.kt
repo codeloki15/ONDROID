@@ -1,28 +1,25 @@
 package com.locallink.pro.service.llm
 
-import com.locallink.pro.service.llm.tools.ToolCall
-import com.locallink.pro.service.llm.tools.ToolRegistry
 import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Unifies on-device tools ([ToolRegistry], snake_case) with cloud Composio tools
- * (UPPERCASE slugs). Presents one merged OpenAI tool list to the LLM and dispatches each
- * call to the right executor by name. Composio tools are only included when a Composio key
- * is set; otherwise this is a thin pass-through to the local registry.
+ * Tool surface for the (cloud) model. This app calls **Composio cloud tools ONLY** (Gmail,
+ * Slack, …) — the on-device device tools are intentionally not exposed or executed.
+ * (User decision 2026-06-05: "it should only call composio tools nothing else".)
+ *
+ * The on-device tool code (ToolRegistry + handlers) remains in the repo but is no longer
+ * routed through here. To re-enable local tools, restore the registry merge/dispatch.
  */
 @Singleton
 class ToolRouter @Inject constructor(
-    private val registry: ToolRegistry,
     private val composio: ComposioClient,
 ) {
-    /** Merged OpenAI tools[] array: local tools + (if enabled) Composio tools. */
+    /** Tools advertised to the model: Composio only (empty if no Composio key set). */
     suspend fun schemas(): JSONArray {
         val merged = JSONArray()
-        val local = registry.openAiToolsArray()
-        for (i in 0 until local.length()) merged.put(local.get(i))
         if (composio.isEnabled()) {
             val cloud = composio.toolSchemas()
             for (i in 0 until cloud.length()) merged.put(cloud.get(i))
@@ -30,22 +27,15 @@ class ToolRouter @Inject constructor(
         return merged
     }
 
-    /** A tool needs confirmation if it's local-and-mutating, OR any Composio (cloud) tool. */
-    suspend fun requiresConfirmation(name: String): Boolean {
-        val localHandler = registry.get(name)
-        if (localHandler != null) return registry.requiresConfirmation(name)
-        // Composio cloud actions touch the user's accounts → always confirm.
-        return true
-    }
+    /** All Composio (cloud) actions touch the user's accounts → always confirm. */
+    suspend fun requiresConfirmation(name: String): Boolean = true
 
-    /** Execute by source: local registry, else Composio. */
+    /** Execute a Composio tool by name. Refuses anything that isn't a known Composio tool. */
     suspend fun execute(name: String, args: JSONObject): String {
-        return if (registry.get(name) != null) {
-            registry.execute(ToolCall(name, args))
-        } else if (composio.isEnabled() && composio.isComposioTool(name)) {
+        return if (composio.isEnabled() && composio.isComposioTool(name)) {
             composio.execute(name, args)
         } else {
-            JSONObject().put("error", "No such tool '$name'").toString()
+            JSONObject().put("error", "No such tool '$name' (only Composio tools are enabled).").toString()
         }
     }
 }

@@ -21,6 +21,7 @@ data class ConnectUiState(
     val search: String = "",
     val error: String? = null,
     val connectingSlug: String? = null,
+    val removingSlug: String? = null,
     /** Set when an OAuth URL should be opened in a Custom Tab. */
     val openUrl: String? = null,
 )
@@ -68,6 +69,18 @@ class ConnectViewModel @Inject constructor(
                     _ui.update { it.copy(openUrl = url) }
                 },
                 onFailure = { e -> _ui.update { it.copy(connectingSlug = null, error = e.message) } },
+            )
+        }
+    }
+
+    /** Disconnect a connected app so it can be re-added. */
+    fun disconnect(app: ComposioApp) {
+        val caId = app.connectedAccountId ?: return
+        viewModelScope.launch {
+            _ui.update { it.copy(removingSlug = app.slug, error = null) }
+            composio.disconnect(caId).fold(
+                onSuccess = { _ui.update { it.copy(removingSlug = null) }; load() },
+                onFailure = { e -> _ui.update { it.copy(removingSlug = null, error = e.message) } },
             )
         }
     }

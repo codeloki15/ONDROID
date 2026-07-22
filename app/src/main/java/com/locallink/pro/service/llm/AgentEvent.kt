@@ -11,6 +11,9 @@ sealed interface AgentEvent {
     /** A tool finished executing. */
     data class ToolResult(val id: String, val name: String, val result: String, val success: Boolean) : AgentEvent
 
+    /** Composio needs the user to authorize an app — open this OAuth URL (Custom Tab). */
+    data class OpenAuthUrl(val url: String) : AgentEvent
+
     /** The final natural-language reply; loop is done. */
     data class Final(val text: String) : AgentEvent
 }

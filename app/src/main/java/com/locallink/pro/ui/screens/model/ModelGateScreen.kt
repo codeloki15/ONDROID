@@ -29,13 +29,15 @@ fun ModelGateScreen(
     val state by vm.state.collectAsState()
     LaunchedEffect(state) { if (state is ModelState.Ready) onReady() }
 
-    Box(Modifier.fillMaxSize().background(OmniBg).padding(28.dp), contentAlignment = Alignment.Center) {
+    GlassBackground {
+        Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Box(
-                Modifier.size(72.dp).clip(RoundedCornerShape(22.dp)).background(OmniAccentContainer),
+                Modifier.size(76.dp)
+                    .glass(shape = RoundedCornerShape(24.dp), fill = OmniAccentContainer),
                 contentAlignment = Alignment.Center,
             ) { Text("✦", color = OmniAccentBright, style = MaterialTheme.typography.headlineMedium) }
 
@@ -67,6 +69,7 @@ fun ModelGateScreen(
                     ) { Text("Retry") }
                 }
             }
+        }
         }
     }
 }

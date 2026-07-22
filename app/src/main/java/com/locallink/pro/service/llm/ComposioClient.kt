@@ -49,15 +49,82 @@ class ComposioClient @Inject constructor(
     @Volatile private var cachedSchemas: JSONArray? = null
     @Volatile private var cachedForSlugs: String = ""
 
+    /** Tool slugs discovered on-demand this run (via search_tools) — so execute() recognizes them. */
+    private val discovered = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     suspend fun isEnabled(): Boolean = settings.loadComposioApiKey().isNotBlank()
 
-    /** Whether a given tool name is a Composio tool we know about (UPPERCASE slug we fetched). */
-    fun isComposioTool(name: String): Boolean =
+    /** Whether a given tool name is a Composio tool we know about (configured, discovered, or slug-shaped). */
+    fun isComposioTool(name: String): Boolean {
+        if (discovered.contains(name)) return true
         cachedSchemas?.let { arr ->
-            (0 until arr.length()).any {
-                arr.getJSONObject(it).optJSONObject("function")?.optString("name") == name
+            for (i in 0 until arr.length())
+                if (arr.getJSONObject(i).optJSONObject("function")?.optString("name") == name) return true
+        }
+        return name.matches(Regex("[A-Z][A-Z0-9_]+"))
+    }
+
+    /** Slugs of the user's ACTIVE connected toolkits (e.g. ["gmail","googlecalendar",…]). */
+    suspend fun connectedToolkits(): List<String> = withContext(Dispatchers.IO) {
+        val key = settings.loadComposioApiKey()
+        if (key.isBlank()) return@withContext emptyList()
+        val userId = settings.loadComposioUserId()
+        runCatching {
+            val (c, t) = get("$CONN_URL?user_ids=$userId&statuses=ACTIVE&limit=100", key)
+            if (c != 200) return@runCatching emptyList<String>()
+            val arr = JSONObject(t).optJSONArray("items") ?: JSONArray()
+            (0 until arr.length()).mapNotNull {
+                arr.getJSONObject(it).optJSONObject("toolkit")?.optString("slug")?.takeIf { s -> s.isNotBlank() }
+            }.distinct()
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * On-demand tool discovery: fetch a connected app's tools, rank by [query], return the top
+     * [limit] as OpenAI tool schemas. This is what powers real-time registration — tools are
+     * pulled only when the model asks (via the search_tools meta-tool), never all pre-loaded.
+     */
+    suspend fun searchToolSchemas(app: String, query: String, limit: Int = 6): JSONArray =
+        withContext(Dispatchers.IO) {
+            val key = settings.loadComposioApiKey()
+            if (key.isBlank() || app.isBlank()) return@withContext JSONArray()
+            val slug = app.trim().lowercase()
+            try {
+                val (code, text) = get("$LIST_URL?toolkit_slug=$slug&limit=100", key)
+                if (code != 200) { Log.e(TAG, "searchTools $slug HTTP $code"); return@withContext JSONArray() }
+                val items = JSONObject(text).optJSONArray("items")
+                    ?: JSONObject(text).optJSONArray("data") ?: JSONArray()
+                val words = Regex("[a-z]{3,}").findAll(query.lowercase()).map { it.value }.toSet()
+                // rank each tool by query-word overlap on slug + description
+                data class Scored(val obj: JSONObject, val score: Int)
+                val scored = ArrayList<Scored>(items.length())
+                for (i in 0 until items.length()) {
+                    val t = items.getJSONObject(i)
+                    val name = t.optString("slug").ifBlank { t.optString("name") }
+                    if (name.isBlank()) continue
+                    val hay = (name + " " + t.optString("description")).lowercase()
+                    scored += Scored(t, words.count { hay.contains(it) })
+                }
+                val ranked = scored.sortedByDescending { it.score }.take(limit)
+                val out = JSONArray()
+                for (s in ranked) {
+                    val t = s.obj
+                    val name = t.optString("slug").ifBlank { t.optString("name") }
+                    val params = t.optJSONObject("input_parameters")
+                        ?: t.optJSONObject("parameters")
+                        ?: JSONObject().put("type", "object").put("properties", JSONObject())
+                    out.put(JSONObject().put("type", "function").put("function", JSONObject()
+                        .put("name", name)
+                        .put("description", t.optString("description").take(300))
+                        .put("parameters", params)))
+                    discovered.add(name)
+                }
+                out
+            } catch (e: Exception) {
+                Log.e(TAG, "searchToolSchemas failed", e)
+                JSONArray()
             }
-        } ?: name.matches(Regex("[A-Z][A-Z0-9_]+"))
+        }
 
     /** OpenAI-style tool schemas for the configured Composio slugs (cached). Empty if disabled. */
     suspend fun toolSchemas(): JSONArray = withContext(Dispatchers.IO) {
@@ -145,6 +212,11 @@ class ComposioClient @Inject constructor(
         http.newCall(req).execute().use { return it.code to (it.body?.string() ?: "") }
     }
 
+    private fun delete(url: String, key: String): Pair<Int, String> {
+        val req = Request.Builder().url(url).addHeader("x-api-key", key).delete().build()
+        http.newCall(req).execute().use { return it.code to (it.body?.string() ?: "") }
+    }
+
     /** Browse connectable apps (Composio-managed OAuth), with which are already connected for the user. */
     suspend fun listApps(search: String = ""): Result<List<ComposioApp>> = withContext(Dispatchers.IO) {
         val key = settings.loadComposioApiKey()
@@ -158,15 +230,19 @@ class ComposioClient @Inject constructor(
             if (code != 200) return@withContext Result.failure(Exception("Couldn't load apps (HTTP $code)"))
             val items = JSONObject(text).optJSONArray("items") ?: JSONArray()
 
-            // Which toolkits are already ACTIVE for this user
+            // Which toolkits are already ACTIVE for this user → slug -> connectedAccountId
             val userId = settings.loadComposioUserId()
-            val connected = mutableSetOf<String>()
+            val connectedIds = mutableMapOf<String, String>()
             runCatching {
                 val (c2, t2) = get("$CONN_URL?user_ids=$userId&statuses=ACTIVE&limit=100", key)
                 if (c2 == 200) {
                     val arr = JSONObject(t2).optJSONArray("items") ?: JSONArray()
-                    for (i in 0 until arr.length())
-                        arr.getJSONObject(i).optJSONObject("toolkit")?.optString("slug")?.let { connected += it }
+                    for (i in 0 until arr.length()) {
+                        val acc = arr.getJSONObject(i)
+                        val slug = acc.optJSONObject("toolkit")?.optString("slug") ?: continue
+                        val id = acc.optString("id")
+                        if (id.isNotBlank()) connectedIds[slug] = id
+                    }
                 }
             }
 
@@ -182,8 +258,9 @@ class ComposioClient @Inject constructor(
                     name = it.optString("name", slug),
                     logo = it.optJSONObject("meta")?.optString("logo") ?: "",
                     toolsCount = it.optJSONObject("meta")?.optInt("tools_count") ?: 0,
-                    connected = slug in connected,
+                    connected = slug in connectedIds,
                     noAuth = noAuth,
+                    connectedAccountId = connectedIds[slug],
                 )
             }
             Result.success(out)
@@ -256,6 +333,21 @@ class ComposioClient @Inject constructor(
             if (c == 200) JSONObject(t).optString("status") == "ACTIVE" else false
         }.getOrDefault(false)
     }
+
+    /** Disconnect (delete) a connected account so the app can be re-added fresh. */
+    suspend fun disconnect(caId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val key = settings.loadComposioApiKey()
+        if (key.isBlank()) return@withContext Result.failure(Exception("Set a Composio API key first"))
+        try {
+            val (c, t) = delete("$CONN_URL/$caId", key)
+            if (c !in 200..204) return@withContext Result.failure(Exception("Disconnect HTTP $c: ${t.take(160)}"))
+            cachedSchemas = null // tools list changes after removal
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "disconnect failed", e)
+            Result.failure(e)
+        }
+    }
 }
 
 /** One connectable app for the connect grid. */
@@ -266,4 +358,5 @@ data class ComposioApp(
     val toolsCount: Int,
     val connected: Boolean,
     val noAuth: Boolean = false, // works without connecting (e.g. the "composio" toolkit)
+    val connectedAccountId: String? = null, // the ACTIVE connected-account id, for disconnect
 )

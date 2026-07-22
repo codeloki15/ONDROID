@@ -1,6 +1,7 @@
 package com.locallink.pro.ui.screens.settings
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -42,7 +45,9 @@ fun SettingsScreen(
         }
     }
 
+    GlassBackground {
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             Column {
                 Row(
@@ -72,32 +77,25 @@ fun SettingsScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             // Save button at the bottom
-            Surface(
-                shadowElevation = 8.dp,
-                tonalElevation = 2.dp,
-                color = MaterialTheme.colorScheme.surface
-            ) {
-                Column {
-                    HorizontalDivider(color = omniColors.border, thickness = 0.5.dp)
-                    Button(
-                        onClick = { viewModel.saveSettings() },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Save,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Save Settings", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    }
+            Column {
+                HorizontalDivider(color = omniColors.border, thickness = 0.5.dp)
+                Button(
+                    onClick = { viewModel.saveSettings() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Save,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Save Settings", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         },
-        containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         Column(
             modifier = Modifier
@@ -171,6 +169,28 @@ fun SettingsScreen(
 
             // AI Model — OpenRouter cloud (pick any tool-capable model)
             SettingsSection(title = "AI Model") {
+                // Engine routing: Auto / Cloud only / On-device only
+                Text("Engine", style = MaterialTheme.typography.bodyLarge)
+                Spacer(Modifier.height(8.dp))
+                EngineModeSelector(
+                    selected = uiState.engineMode,
+                    onSelect = viewModel::setEngineMode,
+                )
+                Text(
+                    when (uiState.engineMode) {
+                        com.locallink.pro.data.local.EngineMode.AUTO ->
+                            "Cloud model first, automatically falls back to the on-device model if the cloud is rate-limited or unavailable."
+                        com.locallink.pro.data.local.EngineMode.CLOUD_ONLY ->
+                            "Only use the cloud model. Shows an error if the cloud is unavailable (no on-device fallback)."
+                        com.locallink.pro.data.local.EngineMode.LOCAL_ONLY ->
+                            "Always use the on-device model. Fully offline — never calls the cloud, even with a key set."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = OmniTextSecondary,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 14.dp),
+                )
+                HorizontalDivider(color = omniColors.border, thickness = 0.5.dp, modifier = Modifier.padding(bottom = 14.dp))
+
                 Text(
                     "Add an OpenRouter API key to use a cloud model for chat + function calling. " +
                         "Leave blank to use the on-device model (offline). Get a key at openrouter.ai/keys.",
@@ -187,6 +207,7 @@ fun SettingsScreen(
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
+                GetKeyLink(label = "Get an OpenRouter API key", url = "https://openrouter.ai/keys")
 
                 Spacer(Modifier.height(12.dp))
 
@@ -251,6 +272,7 @@ fun SettingsScreen(
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
+                GetKeyLink(label = "Get a Composio API key", url = "https://app.composio.dev/developers")
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = uiState.composioUserId,
@@ -316,6 +338,7 @@ fun SettingsScreen(
             }
         }
     }
+    }
 }
 
 @Composable
@@ -333,15 +356,81 @@ private fun SettingsSection(
             letterSpacing = 1.sp,
             modifier = Modifier.padding(bottom = 8.dp, start = 4.dp),
         )
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, omniColors.borderLight),
-            color = MaterialTheme.colorScheme.surface,
+        GlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = 16.dp,
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                content()
+            Column { content() }
+        }
+    }
+}
+
+/** Segmented 3-way selector for the LLM engine mode. */
+@Composable
+private fun EngineModeSelector(
+    selected: com.locallink.pro.data.local.EngineMode,
+    onSelect: (com.locallink.pro.data.local.EngineMode) -> Unit,
+) {
+    val options = listOf(
+        com.locallink.pro.data.local.EngineMode.AUTO to "Auto",
+        com.locallink.pro.data.local.EngineMode.CLOUD_ONLY to "Cloud",
+        com.locallink.pro.data.local.EngineMode.LOCAL_ONLY to "On-device",
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(OmniSurface3)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEach { (mode, label) ->
+            val active = mode == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (active) OmniAccent else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable { onSelect(mode) }
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (active) OmniTextOnAccent else OmniTextSecondary,
+                )
             }
         }
+    }
+}
+
+/** A small tappable "Get an API key →" link that opens the provider's key page in a browser. */
+@Composable
+private fun GetKeyLink(label: String, url: String) {
+    val uriHandler = LocalUriHandler.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { runCatching { uriHandler.openUri(url) } }
+            .padding(top = 6.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.OpenInNew,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = OmniAccent,
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = OmniAccent,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 

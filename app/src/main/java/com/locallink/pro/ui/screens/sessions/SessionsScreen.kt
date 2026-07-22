@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -29,43 +30,57 @@ import com.locallink.pro.ui.theme.*
 @Composable
 fun SessionsScreen(
     onOpenSession: (String?) -> Unit,
+    onOpenSettings: () -> Unit,
     vm: SessionsViewModel = hiltViewModel(),
 ) {
     val sessions by vm.sessions.collectAsState()
-    Scaffold(
-        containerColor = OmniBg,
-        topBar = {
-            TopAppBar(
-                title = { Text("Chats", style = MaterialTheme.typography.headlineMedium, color = OmniText) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = OmniBg),
-            )
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { onOpenSession(null) },
-                containerColor = OmniAccent,
-                contentColor = OmniTextOnAccent,
-                icon = { Icon(Icons.Default.Add, null) },
-                text = { Text("New chat") },
-            )
-        },
-    ) { padding ->
-        if (sessions.isEmpty()) {
-            Box(Modifier.padding(padding).fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.AutoMirrored.Filled.Chat, null, tint = OmniTextFaint, modifier = Modifier.size(40.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text("No conversations yet", color = OmniTextDim, style = MaterialTheme.typography.bodyLarge)
-                    Text("Tap “New chat” to start.", color = OmniTextFaint, style = MaterialTheme.typography.bodyMedium)
+    GlassBackground {
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                TopAppBar(
+                    title = { Text("Chats", style = MaterialTheme.typography.headlineMedium, color = OmniText) },
+                    actions = {
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(OmniIcons.settings(), "Settings", tint = Color.Unspecified, modifier = Modifier.size(24.dp))
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                )
+            },
+            floatingActionButton = {
+                ExtendedFloatingActionButton(
+                    onClick = { onOpenSession(null) },
+                    containerColor = OmniAccent,
+                    contentColor = OmniTextOnAccent,
+                    icon = { Icon(Icons.Default.Add, null) },
+                    text = { Text("New chat", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) },
+                )
+            },
+        ) { padding ->
+            if (sessions.isEmpty()) {
+                Box(Modifier.padding(padding).fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            Modifier.size(64.dp).clip(CircleShape).background(OmniAccentContainer)
+                                .border(1.dp, GlassBorder, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(OmniIcons.messaging(), null, tint = Color.Unspecified, modifier = Modifier.size(32.dp))
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Text("No conversations yet", color = OmniTextDim, style = MaterialTheme.typography.bodyLarge)
+                        Text("Tap “New chat” to start.", color = OmniTextFaint, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
-            }
-        } else {
-            LazyColumn(
-                Modifier.padding(padding).fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(sessions, key = { it.id }) { s -> SessionRow(s, { onOpenSession(s.id) }, { vm.delete(s.id) }) }
+            } else {
+                LazyColumn(
+                    Modifier.padding(padding).fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(sessions, key = { it.id }) { s -> SessionRow(s, { onOpenSession(s.id) }, { vm.delete(s.id) }) }
+                }
             }
         }
     }
@@ -73,23 +88,24 @@ fun SessionsScreen(
 
 @Composable
 private fun SessionRow(s: SessionEntity, onClick: () -> Unit, onDelete: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-            .background(OmniSurface).border(1.dp, OmniBorderSoft, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick).padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    GlassCard(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        contentPadding = 14.dp,
     ) {
-        Box(
-            Modifier.size(40.dp).clip(CircleShape).background(OmniAccentContainer),
-            contentAlignment = Alignment.Center,
-        ) { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = OmniAccentBright, modifier = Modifier.size(20.dp)) }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            s.title, color = OmniText, style = MaterialTheme.typography.titleSmall,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-        )
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Outlined.DeleteOutline, "Delete", tint = OmniTextFaint, modifier = Modifier.size(20.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).background(OmniAccentContainer),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = OmniAccentBright, modifier = Modifier.size(20.dp)) }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                s.title, color = OmniText, style = MaterialTheme.typography.titleSmall,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Outlined.DeleteOutline, "Delete", tint = OmniTextFaint, modifier = Modifier.size(20.dp))
+            }
         }
     }
 }

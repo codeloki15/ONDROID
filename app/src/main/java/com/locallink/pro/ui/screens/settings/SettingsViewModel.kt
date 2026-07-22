@@ -2,6 +2,7 @@ package com.locallink.pro.ui.screens.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.locallink.pro.data.local.EngineMode
 import com.locallink.pro.data.local.SettingsPreferences
 import com.locallink.pro.data.repository.ChatRepository
 import com.locallink.pro.service.llm.OpenRouterClient
@@ -33,6 +34,7 @@ data class SettingsUiState(
     val loadingModels: Boolean = false,
     val modelsError: String? = null,
     val freeOnly: Boolean = false,
+    val engineMode: EngineMode = EngineMode.AUTO,
     // Composio (cloud SaaS tools, beta)
     val composioApiKey: String = "",
     val composioUserId: String = "default",
@@ -115,6 +117,9 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsPreferences.handsFree.collect { h -> _uiState.update { it.copy(handsFree = h) } }
         }
+        viewModelScope.launch {
+            settingsPreferences.engineMode.collect { m -> _uiState.update { it.copy(engineMode = m) } }
+        }
 
         // Composio settings
         viewModelScope.launch { settingsPreferences.composioApiKey.collect { k -> _uiState.update { it.copy(composioApiKey = k) } } }
@@ -149,6 +154,11 @@ class SettingsViewModel @Inject constructor(
 
     fun toggleFreeOnly() {
         _uiState.update { it.copy(freeOnly = !it.freeOnly) }
+    }
+
+    fun setEngineMode(mode: EngineMode) {
+        _uiState.update { it.copy(engineMode = mode) }
+        settingsPreferences.setEngineMode(mode)
     }
 
     fun fetchModels() {

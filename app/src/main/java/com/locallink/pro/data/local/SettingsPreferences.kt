@@ -17,6 +17,14 @@ import kotlinx.coroutines.withContext
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "app_settings")
 
+/**
+ * Which LLM "brain" answers a turn.
+ *  - AUTO: cloud (OpenRouter) first, fall back to the on-device model on failure.
+ *  - CLOUD_ONLY: only OpenRouter; surface an error if it fails (never use local).
+ *  - LOCAL_ONLY: always on-device; never call OpenRouter even if a key is set.
+ */
+enum class EngineMode { AUTO, CLOUD_ONLY, LOCAL_ONLY }
+
 class SettingsPreferences(private val context: Context) {
 
     companion object {
@@ -42,6 +50,9 @@ class SettingsPreferences(private val context: Context) {
 
         // Hands-free (wake-word) mode
         private val KEY_HANDS_FREE = booleanPreferencesKey("hands_free_enabled")
+
+        // LLM engine mode (cloud / local routing)
+        private val KEY_ENGINE_MODE = stringPreferencesKey("engine_mode")
 
         // Composio (cloud SaaS tools, opt-in beta) — BYO project key
         private val KEY_COMPOSIO_API_KEY = stringPreferencesKey("composio_api_key")
@@ -112,6 +123,14 @@ class SettingsPreferences(private val context: Context) {
     val handsFree: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_HANDS_FREE] ?: false }
     suspend fun loadHandsFree(): Boolean = handsFree.first()
     fun setHandsFree(enabled: Boolean) = editAsync { it[KEY_HANDS_FREE] = enabled }
+
+    // ─── LLM engine mode (cloud / local routing) ────────────────────────────
+    val engineMode: Flow<EngineMode> = context.settingsDataStore.data.map { prefs ->
+        runCatching { EngineMode.valueOf(prefs[KEY_ENGINE_MODE] ?: EngineMode.AUTO.name) }
+            .getOrDefault(EngineMode.AUTO)
+    }
+    suspend fun loadEngineMode(): EngineMode = engineMode.first()
+    fun setEngineMode(mode: EngineMode) = editAsync { it[KEY_ENGINE_MODE] = mode.name }
 
     suspend fun loadComposioApiKey(): String = composioApiKey.first()
     suspend fun loadComposioUserId(): String = composioUserId.first()

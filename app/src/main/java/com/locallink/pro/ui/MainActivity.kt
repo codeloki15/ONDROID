@@ -12,13 +12,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
+import com.locallink.pro.data.local.SettingsPreferences
+import com.locallink.pro.service.voice.VoiceLoopService
 import com.locallink.pro.ui.navigation.LocalLinkNavGraph
 import com.locallink.pro.ui.theme.LocalLinkProTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var settings: SettingsPreferences
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -29,6 +36,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestPermissions()
+
+        // Resume hands-free listening if the user left it on (Activity is visible → FGS allowed).
+        lifecycleScope.launch {
+            if (settings.loadHandsFree() &&
+                ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED
+            ) {
+                VoiceLoopService.start(this@MainActivity)
+            }
+        }
 
         setContent {
             LocalLinkProTheme {

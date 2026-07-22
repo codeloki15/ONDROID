@@ -36,6 +36,9 @@ class ChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    /** Composio OAuth links to open in a Custom Tab (agent is connecting an app in-flow). */
+    val authUrlToOpen = chatRepository.authUrlToOpen
+
     init {
         voiceService.initialize()
         viewModelScope.launch { voiceService.autoTts.collect { e -> _uiState.update { it.copy(autoTts = e) } } }
@@ -85,6 +88,18 @@ class ChatViewModel @Inject constructor(
 
     fun stopTts() = voiceService.stopSpeaking()
     fun toggleAutoTts() = voiceService.setAutoTts(!_uiState.value.autoTts)
+
+    /** Speak an arbitrary message aloud (used by the message "Speak" action). */
+    fun speak(text: String) { if (text.isNotBlank()) voiceService.speak(text) }
+
+    /** Drop the last reply and ask the model again on the same user turn. */
+    fun regenerate() {
+        if (_uiState.value.isAiResponding) return
+        viewModelScope.launch { chatRepository.regenerateLast() }
+    }
+
+    /** Put a message back into the input box so the user can edit and resend it. */
+    fun editAndResend(text: String) = _uiState.update { it.copy(inputText = text) }
 
     override fun onCleared() {
         super.onCleared()

@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -115,7 +116,13 @@ fun ConnectScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(ui.apps, key = { it.slug }) { app ->
-                        AppCard(app, connecting = ui.connectingSlug == app.slug) { vm.connect(app) }
+                        AppCard(
+                            app = app,
+                            connecting = ui.connectingSlug == app.slug,
+                            removing = ui.removingSlug == app.slug,
+                            onConnect = { vm.connect(app) },
+                            onDisconnect = { vm.disconnect(app) },
+                        )
                     }
                 }
             }
@@ -124,7 +131,17 @@ fun ConnectScreen(
 }
 
 @Composable
-private fun AppCard(app: ComposioApp, connecting: Boolean, onClick: () -> Unit) {
+private fun AppCard(
+    app: ComposioApp,
+    connecting: Boolean,
+    removing: Boolean,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    // A connected app (with a real connection) can be removed; no-auth apps have nothing to remove.
+    val removable = app.connected && !app.noAuth && app.connectedAccountId != null
+    var confirm by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -135,7 +152,7 @@ private fun AppCard(app: ComposioApp, connecting: Boolean, onClick: () -> Unit) 
                 if (app.connected || app.noAuth) OmniSuccess.copy(alpha = 0.4f) else OmniBorder,
                 RoundedCornerShape(18.dp),
             )
-            .clickable(enabled = !app.connected && !app.noAuth && !connecting, onClick = onClick)
+            .clickable(enabled = !app.connected && !app.noAuth && !connecting, onClick = onConnect)
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -154,6 +171,10 @@ private fun AppCard(app: ComposioApp, connecting: Boolean, onClick: () -> Unit) 
             }
             Spacer(Modifier.weight(1f))
             when {
+                removing -> CircularProgressIndicator(color = OmniError, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                removable -> IconButton(onClick = { confirm = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, "Disconnect", tint = OmniTextFaint, modifier = Modifier.size(18.dp))
+                }
                 app.connected || app.noAuth -> Box(
                     Modifier.size(24.dp).clip(CircleShape).background(OmniSuccess),
                     contentAlignment = Alignment.Center,
@@ -166,11 +187,28 @@ private fun AppCard(app: ComposioApp, connecting: Boolean, onClick: () -> Unit) 
         Text(
             when {
                 app.noAuth -> "Ready · no login"
-                app.connected -> "Connected"
+                app.connected -> "Connected · tap ✕ to remove"
                 else -> "${app.toolsCount} tools · tap to connect"
             },
             color = if (app.connected || app.noAuth) OmniSuccess else OmniTextFaint,
             style = MaterialTheme.typography.labelSmall,
+        )
+    }
+
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Disconnect ${app.name}?") },
+            text = { Text("This removes the connection and its tools. You can re-add it anytime.") },
+            confirmButton = {
+                TextButton(onClick = { confirm = false; onDisconnect() }) {
+                    Text("Disconnect", color = OmniError)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+            containerColor = OmniSurface2,
+            titleContentColor = OmniText,
+            textContentColor = OmniTextDim,
         )
     }
 }

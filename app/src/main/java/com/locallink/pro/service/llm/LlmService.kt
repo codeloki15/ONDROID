@@ -8,13 +8,12 @@ import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -77,97 +76,64 @@ class LlmService @Inject constructor(
 
     /**
      * Generate a streamed response. Emits partial text chunks; completes when done.
-     * A fresh session is created per call; [history] re-seeds prior turns for context.
-     * Runs off the main thread; serialized so two sends can't overlap.
+     * A fresh session is created per call. Runs off the main thread; serialized so two
+     * sends can't overlap the single MediaPipe engine.
      */
     override fun generateStream(
         prompt: String,
         image: Bitmap?,
         history: List<Pair<String, String>>,
-    ): Flow<String> = callbackFlow {
-        val useImage = image != null && MODEL_SUPPORTS_VISION
-
-        try {
-            ensureLoaded()
-        } catch (e: Throwable) {
-            Log.e(TAG, "ensureLoaded failed", e)
-            close(e)
-            return@callbackFlow
-        }
-        val eng = engine ?: run {
-            close(IllegalStateException("LLM not loaded"))
-            return@callbackFlow
-        }
-
-        genMutex.withLock {
-            val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-                .setTopK(40)
-                .setTemperature(0.8f)
-                .apply {
-                    if (useImage) {
-                        setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
-                    }
-                }
-                .build()
-
-            val session = LlmInferenceSession.createFromOptions(eng, sessionOptions)
-            try {
-                // Pass the raw prompt as a single chunk; MediaPipe applies the model's
-                // baked-in chat template. (Multi-turn history re-seeding is intentionally
-                // omitted for now — manual role prefixing fights the template and varies
-                // by model family. Each send is a fresh turn until proper templating lands.)
-                session.addQueryChunk(prompt)
-                if (useImage) {
-                    session.addImage(BitmapImageBuilder(image!!).build())
-                }
-
-                session.generateResponseAsync { partial, done ->
-                    trySend(partial)
-                    if (done) channel.close()
-                }
-            } catch (e: Throwable) {
-                Log.e(TAG, "generateStream failed", e)
-                channel.close(e)
-            }
-
-            awaitClose {
-                try { session.close() } catch (_: Exception) {}
-            }
-        }
-    }.buffer(capacity = 256, onBufferOverflow = BufferOverflow.SUSPEND)
-        .flowOn(Dispatchers.Default)
+    ): Flow<String> = generateInternal(
+        prompt = prompt,
+        temperature = 0.8f,
+        image = image?.takeIf { MODEL_SUPPORTS_VISION },
+    )
 
     /** Run a pre-templated prompt (used by the tool/agent loop). No image, no extra templating. */
-    override fun generateRaw(prompt: String, temperature: Float): Flow<String> = callbackFlow {
+    override fun generateRaw(prompt: String, temperature: Float): Flow<String> =
+        generateInternal(prompt = prompt, temperature = temperature, image = null)
+
+    /**
+     * Single serialized generation. The mutex is held for the ENTIRE generation: since
+     * generateResponseAsync returns immediately (non-blocking), we suspend on a Deferred
+     * that the callback completes on done=true. A plain withLock around the launch would
+     * release mid-stream and let a second send collide ("Previous invocation still processing").
+     */
+    private fun generateInternal(
+        prompt: String,
+        temperature: Float,
+        image: Bitmap?,
+    ): Flow<String> = channelFlow {
         try {
             ensureLoaded()
         } catch (e: Throwable) {
             Log.e(TAG, "ensureLoaded failed", e)
-            close(e)
-            return@callbackFlow
+            close(e); return@channelFlow
         }
-        val eng = engine ?: run {
-            close(IllegalStateException("LLM not loaded"))
-            return@callbackFlow
-        }
+        val eng = engine ?: run { close(IllegalStateException("LLM not loaded")); return@channelFlow }
 
         genMutex.withLock {
-            val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            val builder = LlmInferenceSession.LlmInferenceSessionOptions.builder()
                 .setTopK(40)
                 .setTemperature(temperature)
-                .build()
-            val session = LlmInferenceSession.createFromOptions(eng, sessionOptions)
+            if (image != null) {
+                builder.setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
+            }
+            val session = LlmInferenceSession.createFromOptions(eng, builder.build())
+            val done = CompletableDeferred<Unit>()
             try {
                 session.addQueryChunk(prompt)
-                session.generateResponseAsync { partial, done ->
+                if (image != null) session.addImage(BitmapImageBuilder(image).build())
+                session.generateResponseAsync { partial, isDone ->
                     trySend(partial)
-                    if (done) channel.close()
+                    if (isDone) done.complete(Unit)
                 }
+                // Hold the lock until generation finishes OR the consumer cancels.
+                done.await()
             } catch (e: Throwable) {
-                Log.e(TAG, "generateRaw failed", e)
-                channel.close(e)
-            }
-            awaitClose {
+                Log.e(TAG, "generate failed", e)
+                throw e
+            } finally {
                 try { session.close() } catch (_: Exception) {}
             }
         }

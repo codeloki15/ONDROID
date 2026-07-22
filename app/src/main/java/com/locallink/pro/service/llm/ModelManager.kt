@@ -35,6 +35,19 @@ class ModelManager @Inject constructor(
     companion object {
         private const val TAG = "ModelManager"
         const val MODEL_FILENAME = "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task"
+
+        // Optional FunctionGemma tool-router model. When present, it runs FIRST on the
+        // on-device path to decide tool-vs-chat (see project_fg_router design). Absent → the
+        // app falls back to the keyword gate. Accept .task (preferred) AND .litertlm
+        // (pre-converted community builds) — whichever the current MediaPipe can load.
+        val FG_MODEL_FILENAMES = listOf(
+            "functiongemma-270m-it_q8.task",
+            "functiongemma-270m-ft-mobile-actions_q8.task",
+            "functiongemma-270m.task",
+            "functiongemma-270m-ft-mobile-actions_Google_Tensor_G5.litertlm",
+            "mobile_actions_q8_ekv1024.litertlm",
+            "functiongemma-270m.litertlm",
+        )
     }
 
     private val _state = MutableStateFlow<ModelState>(ModelState.Checking)
@@ -44,6 +57,14 @@ class ModelManager @Inject constructor(
     fun modelFile(): File = File(context.getExternalFilesDir("models"), MODEL_FILENAME)
 
     fun isReady(): Boolean = modelFile().exists() && modelFile().length() > 0
+
+    /** The FunctionGemma `.task` if one was pushed, else null (router stays dormant). */
+    fun fgModelFile(): File? {
+        val dir = context.getExternalFilesDir("models") ?: return null
+        return FG_MODEL_FILENAMES.map { File(dir, it) }.firstOrNull { it.exists() && it.length() > 0 }
+    }
+
+    fun isFgReady(): Boolean = fgModelFile() != null
 
     /** Check the pushed model is present and non-empty. Idempotent. */
     suspend fun prepare() = withContext(Dispatchers.IO) {

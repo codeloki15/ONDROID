@@ -31,9 +31,12 @@ fun LocalLinkNavGraph(navController: NavHostController) {
             })
         }
         composable(Routes.SESSIONS) {
-            SessionsScreen(onOpenSession = { id ->
-                navController.navigate("${Routes.CHAT}?sessionId=${id ?: ""}")
-            })
+            SessionsScreen(
+                onOpenSession = { id ->
+                    navController.navigate("${Routes.CHAT}?sessionId=${id ?: ""}")
+                },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+            )
         }
         composable(
             "${Routes.CHAT}?sessionId={sessionId}",

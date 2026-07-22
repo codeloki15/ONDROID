@@ -90,6 +90,24 @@ object QwenChatTemplate {
             append(IM_START).append("assistant\n")
         }
 
+    /**
+     * Prompt for the FunctionGemma-router path: a tool already ran (decided by FG); ask the
+     * chat model to phrase the result(s) for the user in one short sentence. No tool schemas —
+     * keeps the prompt tiny so the on-device model stays within budget.
+     */
+    fun buildToolSummaryPrompt(userTurn: String, results: List<Pair<String, String>>): String = buildString {
+        append(IM_START).append("system\n")
+        append("You are Omni. A device action was just performed for the user. Reply in one short, ")
+        append("natural sentence confirming what happened. Do not mention JSON or function names.")
+        append(IM_END).append("\n")
+        append(IM_START).append("user\n").append(userTurn).append(IM_END).append("\n")
+        append(IM_START).append("user\n")
+        append("Action results:")
+        for ((name, res) in results) append("\n- ").append(name).append(": ").append(res)
+        append(IM_END).append("\n")
+        append(IM_START).append("assistant\n")
+    }
+
     /** Strip a trailing EOS / role markers the model may emit. */
     fun cleanOutput(raw: String): String =
         raw.replace(EOS, "").substringBefore(IM_START).trim()

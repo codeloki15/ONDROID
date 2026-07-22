@@ -7,9 +7,13 @@ import com.locallink.pro.data.db.SessionDao
 import com.locallink.pro.data.db.SessionEntity
 import com.locallink.pro.domain.model.Message
 import com.locallink.pro.domain.model.MessageSender
+import android.util.Log
+import com.locallink.pro.data.local.EngineMode
+import com.locallink.pro.data.local.SettingsPreferences
 import com.locallink.pro.service.llm.AgentEvent
 import com.locallink.pro.service.llm.AgentOrchestrator
 import com.locallink.pro.service.llm.OpenRouterClient
+import com.locallink.pro.service.llm.OpenRouterUnavailable
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import java.util.UUID
@@ -22,7 +26,10 @@ class ChatRepository @Inject constructor(
     private val messageDao: MessageDao,
     private val agent: AgentOrchestrator,
     private val openRouter: OpenRouterClient,
+    private val settings: SettingsPreferences,
 ) {
+    private companion object { const val TAG = "ChatRepository" }
+
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
 
@@ -35,6 +42,10 @@ class ChatRepository @Inject constructor(
     // Latest finished assistant reply text — used by the hands-free voice loop to speak it.
     private val _lastAssistantReply = MutableStateFlow("")
     val lastAssistantReply: StateFlow<String> = _lastAssistantReply.asStateFlow()
+
+    // Composio OAuth links to open in a Custom Tab (emitted when the agent connects an app).
+    private val _authUrlToOpen = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val authUrlToOpen = _authUrlToOpen.asSharedFlow()
 
     fun observeSessions() = sessionDao.observeSessions()
 
@@ -63,8 +74,23 @@ class ChatRepository @Inject constructor(
             MessageEntity(sessionId = sessionId, role = "user", text = text, imageUri = imageUri, isVoice = isVoice, timestamp = now)
         )
         touchSession(sessionId)
+        generateReply(sessionId, text)
+    }
 
-        // History excluding the just-inserted user turn (passed separately as prompt).
+    /**
+     * Re-run the assistant on the most recent user turn: drop the trailing
+     * assistant/tool/system rows, then generate again. No-op if there's no user turn.
+     */
+    suspend fun regenerateLast() {
+        val sessionId = _currentSessionId.value ?: return
+        val lastUser = messageDao.getMessages(sessionId).lastOrNull { it.role == "user" } ?: return
+        messageDao.deleteAfterLastUser(sessionId)
+        generateReply(sessionId, lastUser.text)
+    }
+
+    /** Shared generation core: builds history, streams the reply, persists tool/assistant rows. */
+    private suspend fun generateReply(sessionId: String, userText: String) {
+        // History excluding the latest user turn (passed separately as prompt).
         val history = messageDao.getMessages(sessionId)
             .filter { it.role == "user" || it.role == "assistant" }
             .map { it.role to it.text }
@@ -73,42 +99,25 @@ class ChatRepository @Inject constructor(
         _isAiResponding.value = true
         _streamingText.value = ""
         try {
-            // Prefer OpenRouter (cloud) when an API key is set; else on-device Qwen.
-            val events = if (openRouter.hasKey()) {
-                openRouter.run(history = history, userText = text, confirm = { _, _ -> true })
+            // Cloud-only: this app uses OpenRouter for chat + Composio cloud tools. The on-device
+            // models (Qwen / FunctionGemma) and the 23 local device tools are intentionally
+            // disabled — their code remains but is not routed to. (User decision 2026-06-05.)
+            if (!openRouter.hasKey()) {
+                messageDao.insert(MessageEntity(
+                    sessionId = sessionId, role = "system",
+                    text = "Error: No OpenRouter API key set. Add one in Settings → AI Model to chat.",
+                    timestamp = System.currentTimeMillis(),
+                ))
             } else {
-                agent.run(history = history, userText = text, confirm = { _, _ -> true })
-            }
-            events.collect { event ->
-                when (event) {
-                    is AgentEvent.Token -> _streamingText.value = event.text
-                    is AgentEvent.ToolCall -> {
-                        messageDao.insert(
-                            MessageEntity(
-                                sessionId = sessionId, role = "tool_call",
-                                text = "${event.name}(${event.argsJson})",
-                                timestamp = System.currentTimeMillis(),
-                            )
-                        )
-                    }
-                    is AgentEvent.ToolResult -> {
-                        messageDao.insert(
-                            MessageEntity(
-                                sessionId = sessionId, role = "tool_result",
-                                text = "${event.name} → ${event.result}",
-                                timestamp = System.currentTimeMillis(),
-                            )
-                        )
-                    }
-                    is AgentEvent.Final -> {
-                        messageDao.insert(
-                            MessageEntity(
-                                sessionId = sessionId, role = "assistant",
-                                text = event.text, timestamp = System.currentTimeMillis(),
-                            )
-                        )
-                        _lastAssistantReply.value = event.text
-                    }
+                try {
+                    runEngine(sessionId, openRouter.run(history, userText) { _, _ -> true })
+                } catch (e: OpenRouterUnavailable) {
+                    Log.w(TAG, "OpenRouter unavailable (${e.reason})")
+                    messageDao.insert(MessageEntity(
+                        sessionId = sessionId, role = "system",
+                        text = "Error: Cloud model ${e.reason}. Try again, or pick a different model in Settings.",
+                        timestamp = System.currentTimeMillis(),
+                    ))
                 }
             }
         } catch (e: Exception) {
@@ -119,6 +128,51 @@ class ChatRepository @Inject constructor(
             _streamingText.value = ""
             _isAiResponding.value = false
             touchSession(sessionId)
+        }
+    }
+
+    /** Collect one engine's [AgentEvent] stream into the DB. Persists tool + assistant rows. */
+    private suspend fun runEngine(
+        sessionId: String,
+        events: kotlinx.coroutines.flow.Flow<AgentEvent>,
+    ) {
+        events.collect { event ->
+            when (event) {
+                is AgentEvent.Token -> _streamingText.value = event.text
+                is AgentEvent.ToolCall -> messageDao.insert(
+                    MessageEntity(
+                        sessionId = sessionId, role = "tool_call",
+                        text = "${event.name}(${event.argsJson})",
+                        timestamp = System.currentTimeMillis(),
+                    )
+                )
+                is AgentEvent.ToolResult -> messageDao.insert(
+                    MessageEntity(
+                        sessionId = sessionId, role = "tool_result",
+                        text = "${event.name} → ${event.result}",
+                        timestamp = System.currentTimeMillis(),
+                    )
+                )
+                is AgentEvent.OpenAuthUrl -> {
+                    _authUrlToOpen.tryEmit(event.url)
+                    messageDao.insert(
+                        MessageEntity(
+                            sessionId = sessionId, role = "system",
+                            text = "↳ Opening sign-in to connect your app…",
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                }
+                is AgentEvent.Final -> {
+                    messageDao.insert(
+                        MessageEntity(
+                            sessionId = sessionId, role = "assistant",
+                            text = event.text, timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    _lastAssistantReply.value = event.text
+                }
+            }
         }
     }
 
