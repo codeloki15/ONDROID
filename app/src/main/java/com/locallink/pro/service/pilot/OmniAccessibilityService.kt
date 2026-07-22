@@ -167,21 +167,55 @@ class OmniAccessibilityService : AccessibilityService() {
     /** Pull down the quick-settings panel. */
     fun openQuickSettings(): Boolean = performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
 
-    /** Launch an app by display name or package via the package manager. */
+    /** Launch an app by display name or package. Robust to package-visibility limits. */
     fun launchApp(query: String): Boolean {
         val pm = packageManager
         val q = query.trim().lowercase()
-        // 1) exact package match, else 2) label contains the query.
-        val pkg = runCatching { pm.getLaunchIntentForPackage(query) }.getOrNull()?.let { query }
-            ?: pm.getInstalledApplications(0).firstOrNull {
-                val label = pm.getApplicationLabel(it).toString().lowercase()
-                label == q || label.contains(q)
-            }?.packageName
-            ?: return false
-        val intent = pm.getLaunchIntentForPackage(pkg)?.apply {
-            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        } ?: return false
-        return runCatching { startActivity(intent); true }.getOrDefault(false)
+
+        // 1) Query the actual launcher entries (respects visibility better than getInstalledApplications).
+        val launchers = runCatching {
+            val main = android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+            pm.queryIntentActivities(main, 0)
+        }.getOrDefault(emptyList())
+
+        val byLabel = launchers.map { it to pm.getApplicationLabel(it.activityInfo.applicationInfo).toString().lowercase() }
+        // exact label, then startsWith, then contains — most specific first.
+        val hit = byLabel.firstOrNull { it.second == q }
+            ?: byLabel.firstOrNull { it.second.startsWith(q) }
+            ?: byLabel.firstOrNull { it.second.contains(q) }
+
+        if (hit != null) {
+            val ai = hit.first.activityInfo
+            val intent = android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+                .setClassName(ai.packageName, ai.name)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (runCatching { startActivity(intent); true }.getOrDefault(false)) return true
+        }
+
+        // 2) Common system screens by action (Settings etc.) — most reliable for "open settings".
+        knownActionFor(q)?.let { action ->
+            val intent = android.content.Intent(action).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (runCatching { startActivity(intent); true }.getOrDefault(false)) return true
+        }
+
+        // 3) Treat the query as a package name directly.
+        pm.getLaunchIntentForPackage(query)?.let {
+            it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            return runCatching { startActivity(it); true }.getOrDefault(false)
+        }
+        return false
+    }
+
+    /** Map common app/screen names to a system Intent action (device-independent). */
+    private fun knownActionFor(q: String): String? = when {
+        q.contains("setting") -> android.provider.Settings.ACTION_SETTINGS
+        q.contains("battery") -> android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS
+        q.contains("wifi") || q.contains("wi-fi") -> android.provider.Settings.ACTION_WIFI_SETTINGS
+        q.contains("bluetooth") -> android.provider.Settings.ACTION_BLUETOOTH_SETTINGS
+        q.contains("display") -> android.provider.Settings.ACTION_DISPLAY_SETTINGS
+        else -> null
     }
 
     private suspend fun strokeGesture(path: Path, durationMs: Long): Boolean {
