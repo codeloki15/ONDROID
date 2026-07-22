@@ -111,12 +111,7 @@ class ChatRepository @Inject constructor(
         _streamingText.value = ""
 
         val reasoner = OpenRouterPilotReasoner(settings)
-        val controller = PilotController(
-            reasoner = reasoner,
-            perceive = service::snapshot,
-            tap = service::tapElement,
-            cancelled = { service.cancelFlag.get() },
-        )
+        val controller = PilotController(reasoner = reasoner, actuator = service.asActuator())
         // Run the loop in the SERVICE's scope, not here (viewModelScope), so it survives the app
         // going to the background when Pilot navigates into another app. Each event is persisted to
         // the DB from that scope; the UI "responding" flag is cleared when the terminal Final event
