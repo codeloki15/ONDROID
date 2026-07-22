@@ -195,12 +195,60 @@ This validates permissions + perceive → reason → act → cancel before the f
 narration UI, and no-progress detection are built out. Details belong to the
 implementation plan.
 
+## Deliberate divergences from mobile-use
+
+A critical read of mobile-use's prompts/tools/outputs surfaced weaknesses we will NOT
+copy. These are design decisions, locked:
+
+1. **No second "Executor" LLM.** mobile-use's Cortex emits decisions as an *escaped JSON
+   string*, then a separate Executor LLM re-parses that string into tool calls — with no
+   schema enforcement between the two. That is double fragility (mis-escaping + faithful
+   re-parse), plus extra latency and cost, for zero added capability. **Omni Pilot has the
+   cloud model emit a structured action directly (native `tool_call`), and maps it to a
+   gesture in Kotlin deterministically.** This also matches the existing
+   `OpenRouterClient` tool-call flow. This is the single biggest divergence.
+
+2. **Prune the accessibility tree before sending.** mobile-use serializes every node with
+   ~18 attributes, pretty-printed — 5–20k tokens per step, uncompressed. Since we pay per
+   step on the cloud, Pilot prunes to interactive/text-bearing nodes and drops
+   default/false boolean attributes and redundant fields before serializing. Target
+   ~3–5× token reduction with near-zero capability loss.
+
+3. **Lower decider temperature.** mobile-use runs its decision-maker at temperature 1
+   (high stochasticity, hurts reproducibility). Pilot starts lower; exact value is a
+   plan-phase tuning question.
+
+### Steal verbatim from mobile-use (proven, port as-is)
+
+- **`Target` multi-locator with bounds → resource_id → text fallback** (trust mobile-use's
+  *code* order, not its prompt, which contradicts it) + per-attempt error accumulation.
+- **"Two senses, each with a stated limitation, combine" framing** in the reasoning
+  prompt — teaches the VLM when to trust pixels vs. the tree.
+- **Self-verifying tool feedback** — e.g. after `type`, read the field back and echo it, so
+  the model can verify without a fresh screenshot.
+- **Single-turn perception** — never accumulate hierarchies/screenshots across steps;
+  drop them after each step to keep context bounded.
+- **Scratchpad notes** (`save_note`/`read_note`) for cross-app data transfer without
+  holding data in the prompt.
+- **Domain heuristics** in the reasoning prompt (swipe physics, form-scrolling, exact-data
+  fidelity, "how would a human solve this differently").
+- **id + text cross-check** — if a resource_id and text resolve to different elements, drop
+  the id (guards against hallucinated locators).
+- **Short opaque subgoal IDs** so references survive replans (vs. array indices that shift).
+
 ## Open questions for the plan phase
 
+- **Single-brain vs. plan/act split.** The architecture above uses one model call per step
+  that both reasons and emits the next action (simplest, matches `OpenRouterClient`).
+  mobile-use splits Planner (goal→subgoals) from the per-step decider, which helps on long
+  multi-app tasks by keeping a stable subgoal spine across replans. Decide in the plan
+  phase whether the thin slice starts single-brain and adds an explicit planner only if
+  long tasks prove unreliable (recommended: start single-brain, measure).
 - Exact model id: which OpenRouter vision-capable model is the Pilot default, and how the
   picker filters for `vision` support.
-- Tree flattening depth / element cap to keep the payload within token budget on dense
-  screens.
+- Tree pruning rules and element cap to keep the payload within token budget on dense
+  screens (see divergence #2).
+- Decider temperature value (see divergence #3).
 - Settle/verify timing between act and next perceive (fixed delay vs. wait-for-idle event).
 - How the "pilot intent" is detected/triggered vs. the Composio path (explicit UI toggle
   vs. inferred from the message).
