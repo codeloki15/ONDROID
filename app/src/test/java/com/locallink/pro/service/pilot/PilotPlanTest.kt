@@ -25,7 +25,8 @@ class PilotPlanTest {
 
     @Test fun unknownChannelDefaultsToChat() {
         assertEquals(Channel.CHAT, PlanJson.channelOf("banana"))
-        assertEquals(Channel.COMPOSIO, PlanJson.channelOf("COMPOSIO"))
+        // Composio channel is disabled — it now routes to pilot (do it on-screen).
+        assertEquals(Channel.PILOT, PlanJson.channelOf("COMPOSIO"))
     }
 
     @Test fun malformedJsonIsEmptyPlan() {

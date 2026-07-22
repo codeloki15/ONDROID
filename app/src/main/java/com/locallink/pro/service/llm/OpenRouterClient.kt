@@ -306,6 +306,23 @@ class OpenRouterClient @Inject constructor(
         }
     }
 
+    /**
+     * A plain, tool-free single-turn chat reply (no Composio meta-tools). Used by the planning
+     * agent's "chat" channel so a simple question ("what is 7×8") returns clean text instead of
+     * going through the tool-calling machinery. Returns "" on any failure.
+     */
+    suspend fun plainChat(prompt: String): String = withContext(Dispatchers.IO) {
+        val key = settings.loadOpenRouterApiKey()
+        if (key.isBlank()) return@withContext ""
+        val model = settings.loadOpenRouterModel()
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content",
+                "You are Omni, a concise, helpful assistant. Answer directly."))
+            .put(JSONObject().put("role", "user").put("content", prompt))
+        val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.6)
+        runCatching { postChat(key, body).optString("content") }.getOrDefault("")
+    }
+
     private fun shortErr(text: String): String = try {
         JSONObject(text).optJSONObject("error")?.optString("message")?.take(160) ?: text.take(160)
     } catch (_: Exception) { text.take(160) }

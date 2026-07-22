@@ -16,9 +16,9 @@ class PilotPlannerTest {
         assertEquals("change wallpaper", plan.todos[0].text)
     }
 
-    @Test fun systemPromptNamesAllThreeChannels() {
+    @Test fun systemPromptNamesChatAndPilotChannels() {
         val p = PLANNER_SYSTEM.lowercase()
-        assertTrue(p.contains("chat") && p.contains("composio") && p.contains("pilot"))
+        assertTrue(p.contains("chat") && p.contains("pilot"))
         assertTrue(p.contains("needs_input"))
     }
 }

@@ -55,6 +55,9 @@ class PlanExecutor(
                 i = 0
             }
         }
-        emit(AgentEvent.Final("Done."))
+        // Only emit a terminal "Done." when the plan actually did on-device work; a pure chat
+        // answer is already the user-facing reply, so a trailing "Done." is just noise.
+        if (plan.todos.any { it.channel == Channel.PILOT }) emit(AgentEvent.Final("Done."))
+        else emit(AgentEvent.Final(""))
     }
 }

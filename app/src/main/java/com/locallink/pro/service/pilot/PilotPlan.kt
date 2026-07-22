@@ -16,7 +16,9 @@ data class Plan(val todos: List<Todo>)
 object PlanJson {
     fun channelOf(s: String): Channel = when (s.trim().lowercase()) {
         "pilot" -> Channel.PILOT
-        "composio" -> Channel.COMPOSIO
+        // Composio channel disabled — the assistant works only via the mobile screen (pilot).
+        // Any lingering "composio" from the model is routed to pilot (do it on-screen instead).
+        "composio" -> Channel.PILOT
         else -> Channel.CHAT
     }
 

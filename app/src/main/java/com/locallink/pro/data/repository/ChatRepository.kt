@@ -163,26 +163,11 @@ class ChatRepository @Inject constructor(
             com.locallink.pro.service.pilot.PilotProjectionRequest.request()
         }
         val runner = object : com.locallink.pro.service.pilot.ChannelRunner {
-            override suspend fun chat(todo: String): String {
-                val sb = StringBuilder()
-                openRouter.run(emptyList(), todo) { _, _ -> true }.collect { e ->
-                    if (e is AgentEvent.Final) sb.append(e.text)
-                }
-                return sb.toString()
-            }
-            override suspend fun composio(todo: String): String {
-                // Persist the tool_call/tool_result rows so the user sees the work; the final text
-                // is returned and surfaced by the executor as an AssistantSay.
-                var out = ""
-                openRouter.run(emptyList(), todo) { _, _ -> true }.collect { e ->
-                    when (e) {
-                        is AgentEvent.Final -> out = e.text
-                        is AgentEvent.ToolCall, is AgentEvent.ToolResult -> persistPilotEvent(sessionId, e)
-                        else -> {}
-                    }
-                }
-                return out
-            }
+            override suspend fun chat(todo: String): String =
+                openRouter.plainChat(todo)  // tool-free plain reply (no Composio machinery)
+
+            // Composio channel disabled — never routed here (planner emits only chat/pilot).
+            override suspend fun composio(todo: String): String = openRouter.plainChat(todo)
             override suspend fun pilot(todo: String): Boolean {
                 var stuck = false
                 val controller = com.locallink.pro.service.pilot.PilotController(
@@ -226,7 +211,7 @@ class ChatRepository @Inject constructor(
             ))
             is AgentEvent.OpenAuthUrl -> { /* pilot has no auth flow */ }
             is AgentEvent.Final -> {
-                messageDao.insert(MessageEntity(
+                if (event.text.isNotBlank()) messageDao.insert(MessageEntity(
                     sessionId = sessionId, role = "assistant",
                     text = event.text, timestamp = System.currentTimeMillis(),
                 ))
