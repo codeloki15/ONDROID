@@ -772,13 +772,12 @@ class PilotControllerTest {
     }
 
     @Test fun stopsAtMaxSteps() = runTest {
+        // Reasoner always taps (never done); each perceive returns a DIFFERENT screen
+        // signature so the no-progress guard never fires and the loop runs to maxSteps.
+        var step = 0
         val ctrl = PilotController(
-            reasoner = { _, _, _, _ -> "ask" to """{"question":"?"}""" }.let { r ->
-                // reasoner that never says done and never repeats identically-scored progress
-                var i = 0
-                PilotReasoner { _, els, _, _ -> i++; "tap" to """{"id":0}""" }
-            },
-            perceive = { listOf(PilotElement(0, "n${(0..9).random()}", null, null, null, intArrayOf(0,0,1,1), true, false)) },
+            reasoner = PilotReasoner { _, _, _, _ -> "tap" to """{"id":0}""" },
+            perceive = { listOf(PilotElement(0, "n${step++}", null, null, null, intArrayOf(0, 0, 1, 1), true, false)) },
             tap = { true },
             cancelled = { false },
             maxSteps = 3,
