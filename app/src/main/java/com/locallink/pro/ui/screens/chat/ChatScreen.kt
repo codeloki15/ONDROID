@@ -111,7 +111,10 @@ fun ChatScreen(
         val count = state.messages.size + if (state.streamingText.isNotBlank() || state.isAiResponding) 1 else 0
         if (count > 0) listState.animateScrollToItem(count - 1)
     }
-    // Voice sent → assistant is replying: bring the user back to the conversation.
+    // Voice sent → bring the user back to the conversation to watch the reply.
+    LaunchedEffect(Unit) {
+        vm.voiceFinal.collect { voiceMode = false }
+    }
     LaunchedEffect(state.isAiResponding) {
         if (state.isAiResponding && voiceMode) voiceMode = false
     }

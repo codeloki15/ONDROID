@@ -42,9 +42,13 @@ class PilotController(
     /** Optional per-step screenshot for vision. Returns null → tree-only for that step. */
     private val screenshot: suspend () -> ByteArray? = { null },
     private val maxSteps: Int = 25,
+    /** Called with the successful action trace when the run ends in Done — experience learning. */
+    private val onTrace: (suspend (List<TraceStep>) -> Unit)? = null,
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
         val history = ArrayList<String>()
+        val trace = ArrayList<TraceStep>()
+        var traceBroken = false  // an untraceable step ran → replaying the rest would diverge
         var lastActionSig: String? = null
         var stuckCount = 0
         var step = 0
@@ -59,7 +63,12 @@ class PilotController(
 
             // Terminal actions first.
             when (action) {
-                is PilotAction.Done -> { emit(AgentEvent.Final(action.result)); return@flow }
+                is PilotAction.Done -> {
+                    if (!traceBroken && trace.isNotEmpty() && trace.size <= MAX_TRACE_STEPS) {
+                        onTrace?.invoke(trace.toList())
+                    }
+                    emit(AgentEvent.Final(action.result)); return@flow
+                }
                 is PilotAction.Ask -> { emit(AgentEvent.Final(action.question)); return@flow }
                 is PilotAction.Invalid -> { history.add("invalid action: ${action.reason}"); continue }
                 else -> {}
@@ -81,6 +90,10 @@ class PilotController(
             val (ok, note) = execute(action, elements)
             emit(AgentEvent.ToolResult(id, name, if (ok) note else "failed: $note", ok))
             history.add(note)
+            if (ok) {
+                val ts = traceStepOf(action, elements)
+                if (ts != null) trace.add(ts) else traceBroken = true
+            }
             // Let the screen settle after actions that navigate/transition, so the NEXT perceive
             // (and screenshot) reflect the new screen — this is what stops the model re-issuing the
             // same tap because the old screen was still showing.
@@ -125,6 +138,38 @@ class PilotController(
 
     private fun PilotElement.label(): String = text ?: desc ?: cls ?: ""
 
+    /** Convert an executed action into a replayable [TraceStep] (null = not traceable). */
+    private fun traceStepOf(action: PilotAction, elements: List<PilotElement>): TraceStep? {
+        fun el(id: Int) = elements.firstOrNull { it.id == id }
+        fun target(id: Int, name: String, arg: String? = null): TraceStep? {
+            val e = el(id) ?: return null
+            // An element with no durable identifier can't be re-located on replay.
+            if (e.resId.isNullOrBlank() && e.text.isNullOrBlank() && e.desc.isNullOrBlank()) return null
+            return TraceStep(
+                action = name, arg = arg,
+                targetResId = e.resId, targetText = e.text, targetDesc = e.desc, targetCls = e.cls,
+            )
+        }
+        return when (action) {
+            is PilotAction.Tap -> target(action.id, "tap")
+            is PilotAction.LongPress -> target(action.id, "long_press")
+            is PilotAction.DoubleTap -> target(action.id, "double_tap")
+            is PilotAction.Type -> target(action.id, "type", action.text)
+            is PilotAction.Clear -> target(action.id, "clear")
+            is PilotAction.Swipe -> TraceStep("swipe", action.direction)
+            is PilotAction.Scroll -> TraceStep("scroll", action.direction)
+            is PilotAction.LaunchApp -> TraceStep("launch_app", action.query)
+            is PilotAction.Back -> TraceStep("back")
+            is PilotAction.Home -> TraceStep("home")
+            is PilotAction.Recents -> TraceStep("recents")
+            is PilotAction.Notifications -> TraceStep("notifications")
+            is PilotAction.QuickSettings -> TraceStep("quick_settings")
+            is PilotAction.Wait -> TraceStep("wait", action.ms.toString())
+            // Drag targets two elements; skip tracing (rare + fragile to replay).
+            else -> null
+        }
+    }
+
     /** Actions that typically change the screen and warrant a settle delay before re-perceiving. */
     private fun PilotAction.changesScreen(): Boolean = when (this) {
         is PilotAction.Tap, is PilotAction.DoubleTap, is PilotAction.LaunchApp,
@@ -136,5 +181,6 @@ class PilotController(
 
     private companion object {
         const val SETTLE_MS = 700L
+        const val MAX_TRACE_STEPS = 15  // longer flows are too fragile to replay verbatim
     }
 }

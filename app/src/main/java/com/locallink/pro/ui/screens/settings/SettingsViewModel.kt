@@ -5,8 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.locallink.pro.data.local.EngineMode
 import com.locallink.pro.data.local.SettingsPreferences
 import com.locallink.pro.data.repository.ChatRepository
+import com.locallink.pro.data.repository.ExperienceStore
 import com.locallink.pro.service.llm.OpenRouterClient
 import com.locallink.pro.service.llm.OpenRouterModel
+import com.locallink.pro.service.voice.SttModelManager
+import com.locallink.pro.service.voice.SttModelState
 import com.locallink.pro.service.voice.VoiceService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -35,6 +38,11 @@ data class SettingsUiState(
     val modelsError: String? = null,
     val freeOnly: Boolean = false,
     val engineMode: EngineMode = EngineMode.AUTO,
+    // On-device STT (parakeet)
+    val sttOnDevice: Boolean = true,
+    val sttModelState: SttModelState = SttModelState.Missing,
+    // Learned routines (experience memory)
+    val experienceCount: Int = 0,
     // Composio (cloud SaaS tools, beta)
     val composioApiKey: String = "",
     val composioUserId: String = "default",
@@ -47,6 +55,8 @@ class SettingsViewModel @Inject constructor(
     private val settingsPreferences: SettingsPreferences,
     private val chatRepository: ChatRepository,
     private val openRouter: OpenRouterClient,
+    private val sttModels: SttModelManager,
+    private val experiences: ExperienceStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -125,6 +135,43 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsPreferences.composioApiKey.collect { k -> _uiState.update { it.copy(composioApiKey = k) } } }
         viewModelScope.launch { settingsPreferences.composioUserId.collect { u -> _uiState.update { it.copy(composioUserId = u) } } }
         viewModelScope.launch { settingsPreferences.composioTools.collect { t -> _uiState.update { it.copy(composioTools = t) } } }
+
+        // On-device STT model + preference
+        sttModels.refresh()
+        viewModelScope.launch {
+            sttModels.state.collect { s -> _uiState.update { it.copy(sttModelState = s) } }
+        }
+        viewModelScope.launch {
+            settingsPreferences.sttOnDevice.collect { on -> _uiState.update { it.copy(sttOnDevice = on) } }
+        }
+        // Learned routines count
+        viewModelScope.launch {
+            runCatching { experiences.count() }.onSuccess { c ->
+                _uiState.update { it.copy(experienceCount = c) }
+            }
+        }
+    }
+
+    // ─── On-device STT (parakeet) ────────────────────────────────────────
+    fun setSttOnDevice(enabled: Boolean) {
+        _uiState.update { it.copy(sttOnDevice = enabled) }
+        settingsPreferences.setSttOnDevice(enabled)
+        voiceService.refreshSttEngine()
+    }
+
+    fun downloadSttModel() = sttModels.startDownload()
+    fun cancelSttDownload() = sttModels.cancelDownload()
+    fun deleteSttModel() = sttModels.deleteModel()
+
+    /** Called when a download completes so the engine hot-loads without an app restart. */
+    fun onSttModelReady() = voiceService.refreshSttEngine()
+
+    // ─── Learned routines ────────────────────────────────────────────────
+    fun clearExperiences() {
+        viewModelScope.launch {
+            runCatching { experiences.clear() }
+            _uiState.update { it.copy(experienceCount = 0) }
+        }
     }
 
     fun setComposioApiKey(key: String) {

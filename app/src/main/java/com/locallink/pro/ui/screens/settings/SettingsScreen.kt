@@ -37,7 +37,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.locallink.pro.service.voice.SttModelState
 import com.locallink.pro.service.voice.VoicePreviewPhrases
+import com.locallink.pro.ui.components.GhostPill
 import com.locallink.pro.ui.components.GradientPill
 import com.locallink.pro.ui.components.SearchPill
 import com.locallink.pro.ui.theme.*
@@ -117,6 +119,22 @@ fun SettingsScreen(
                             else com.locallink.pro.service.voice.VoiceLoopService.stop(ctx)
                         }
                     )
+                    SettingsToggle(
+                        title = "On-device recognition",
+                        subtitle = "Parakeet v3 — private, offline, no cloud",
+                        icon = Icons.Outlined.Mic,
+                        checked = uiState.sttOnDevice,
+                        onCheckedChange = viewModel::setSttOnDevice
+                    )
+                    if (uiState.sttOnDevice) {
+                        SttModelBlock(
+                            state = uiState.sttModelState,
+                            onDownload = viewModel::downloadSttModel,
+                            onCancel = viewModel::cancelSttDownload,
+                            onDelete = viewModel::deleteSttModel,
+                            onReady = viewModel::onSttModelReady,
+                        )
+                    }
                     SettingsToggle(
                         title = "Speak replies",
                         subtitle = "Read AI responses aloud",
@@ -211,6 +229,27 @@ fun SettingsScreen(
                         color = OmniTextFaint,
                         modifier = Modifier.padding(top = 8.dp)
                     )
+                }
+
+                // ── Memory ───────────────────────────────────────────────
+                SettingsSection(title = "Memory") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Learned routines", style = MaterialTheme.typography.titleSmall, color = OmniText)
+                            Text(
+                                if (uiState.experienceCount == 0) "Nothing learned yet — successful phone tasks are remembered and replayed exactly"
+                                else "${uiState.experienceCount} task${if (uiState.experienceCount == 1) "" else "s"} Omni can now repeat without thinking",
+                                style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                            )
+                        }
+                        if (uiState.experienceCount > 0) {
+                            Spacer(Modifier.width(10.dp))
+                            GhostPill("Forget all", onClick = viewModel::clearExperiences, height = 38.dp)
+                        }
+                    }
                 }
 
                 // ── Data ─────────────────────────────────────────────────
@@ -581,6 +620,90 @@ private fun OmniTextField(
         ),
         modifier = Modifier.fillMaxWidth()
     )
+}
+
+/** Download / status block for the on-device parakeet STT model (~670 MB). */
+@Composable
+private fun SttModelBlock(
+    state: SttModelState,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit,
+    onReady: () -> Unit,
+) {
+    // Hot-load the engine the moment the download completes.
+    LaunchedEffect(state) { if (state is SttModelState.Ready) onReady() }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 51.dp, bottom = 6.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(OmniSurface3.copy(alpha = 0.35f))
+            .padding(14.dp),
+    ) {
+        when (state) {
+            is SttModelState.Missing -> {
+                Text("Speech model not downloaded", style = MaterialTheme.typography.bodyMedium, color = OmniText)
+                Text(
+                    "nvidia/parakeet-tdt-0.6b-v3 · ~670 MB · 25 languages",
+                    style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                )
+                Spacer(Modifier.height(10.dp))
+                GradientPill("Download model", onClick = onDownload, height = 42.dp)
+                Text(
+                    "Until then the mic uses Android's recognizer.",
+                    style = MaterialTheme.typography.labelSmall, color = OmniTextFaint,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            is SttModelState.Downloading -> {
+                val pct = if (state.total > 0) (state.downloaded * 100 / state.total).toInt() else 0
+                Text("Downloading… $pct%", style = MaterialTheme.typography.bodyMedium, color = OmniText)
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { if (state.total > 0) state.downloaded.toFloat() / state.total else 0f },
+                    color = AuroraViolet,
+                    trackColor = OmniSurface3,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${state.downloaded / 1_000_000} / ${state.total / 1_000_000} MB",
+                    style = MaterialTheme.typography.labelSmall, color = OmniTextFaint,
+                )
+                Spacer(Modifier.height(10.dp))
+                GhostPill("Pause", onClick = onCancel, height = 38.dp)
+            }
+            is SttModelState.Ready -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Check, null, tint = OmniSuccess, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("On-device model ready", style = MaterialTheme.typography.bodyMedium, color = OmniText)
+                        Text(
+                            "The mic now transcribes fully offline.",
+                            style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                        )
+                    }
+                    Text(
+                        "Delete",
+                        style = MaterialTheme.typography.labelLarge, color = OmniError,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onDelete)
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                    )
+                }
+            }
+            is SttModelState.Error -> {
+                Text("Download failed", style = MaterialTheme.typography.bodyMedium, color = OmniError)
+                Text(state.message, style = MaterialTheme.typography.bodySmall, color = OmniTextFaint)
+                Spacer(Modifier.height(10.dp))
+                GradientPill("Resume download", onClick = onDownload, height = 42.dp)
+            }
+        }
+    }
 }
 
 /** Segmented 3-way selector for the LLM engine mode. */

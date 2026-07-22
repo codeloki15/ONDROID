@@ -38,6 +38,7 @@ class SettingsPreferences(private val context: Context) {
 
         // STT Settings
         private val KEY_STT_ENABLED = booleanPreferencesKey("stt_enabled")
+        private val KEY_STT_ON_DEVICE = booleanPreferencesKey("stt_on_device")
 
         // Connection Settings
         private val KEY_AUTO_RECONNECT = booleanPreferencesKey("auto_reconnect")
@@ -123,6 +124,11 @@ class SettingsPreferences(private val context: Context) {
     val handsFree: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_HANDS_FREE] ?: false }
     suspend fun loadHandsFree(): Boolean = handsFree.first()
     fun setHandsFree(enabled: Boolean) = editAsync { it[KEY_HANDS_FREE] = enabled }
+
+    // On-device STT (parakeet). Default ON — used automatically once the model is downloaded.
+    val sttOnDevice: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_STT_ON_DEVICE] ?: true }
+    suspend fun loadSttOnDevice(): Boolean = sttOnDevice.first()
+    fun setSttOnDevice(enabled: Boolean) = editAsync { it[KEY_STT_ON_DEVICE] = enabled }
 
     // ─── LLM engine mode (cloud / local routing) ────────────────────────────
     val engineMode: Flow<EngineMode> = context.settingsDataStore.data.map { prefs ->

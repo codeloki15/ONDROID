@@ -30,11 +30,15 @@ import javax.inject.Singleton
 class VoiceService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val kokoroTts: KokoroTtsService,
-    private val settingsPreferences: SettingsPreferences
+    private val settingsPreferences: SettingsPreferences,
+    private val parakeet: ParakeetSttEngine,
 ) {
     companion object {
         private const val TAG = "VoiceService"
     }
+
+    // On-device STT (parakeet) — used when enabled AND the model is downloaded+loaded.
+    @Volatile private var sttOnDevice = true
 
     // Main thread handler — SpeechRecognizer MUST run on main thread
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -102,6 +106,14 @@ class VoiceService @Inject constructor(
                 _selectedSpeaker.value = settings.selectedSpeaker
                 _sttEnabled.value = settings.sttEnabled
 
+                // On-device STT: preload the parakeet model in the background so the first
+                // mic tap doesn't pay the (multi-second) weight-load cost.
+                sttOnDevice = settingsPreferences.loadSttOnDevice()
+                if (sttOnDevice && parakeet.isModelPresent() && !parakeet.isLoaded) {
+                    val ok = parakeet.ensureLoaded()
+                    Log.i(TAG, "parakeet preload: $ok")
+                }
+
                 // Apply to Kokoro TTS
                 kokoroTts.setSpeed(settings.ttsSpeed)
                 kokoroTts.setSpeakerId(settings.selectedSpeaker)
@@ -135,6 +147,12 @@ class VoiceService @Inject constructor(
         if (_isListening.value) return
         if (!_sttEnabled.value) {
             _sttError.tryEmit("Speech-to-text is disabled in settings")
+            return
+        }
+
+        // Prefer the on-device engine when it's enabled and its weights are loaded.
+        if (sttOnDevice && parakeet.isLoaded) {
+            startParakeetListening()
             return
         }
 
@@ -224,7 +242,45 @@ class VoiceService @Inject constructor(
         }
     }
 
+    /** Single-shot on-device capture through parakeet, mirroring the SpeechRecognizer flow contract. */
+    private fun startParakeetListening() {
+        _partialResult.value = ""
+        val started = parakeet.start(
+            onSpeechStart = { _partialResult.value = "…" },
+            onFinal = { text ->
+                Log.d(TAG, "parakeet final: $text")
+                _partialResult.value = ""
+                _isListening.value = false
+                _finalResult.tryEmit(text)
+            },
+            onError = { msg ->
+                _partialResult.value = ""
+                _isListening.value = false
+                _sttError.tryEmit(msg)
+                Log.w(TAG, "parakeet error: $msg")
+            },
+        )
+        if (started) {
+            _isListening.value = true
+        } else if (!_isListening.value) {
+            _sttError.tryEmit("On-device recognition busy")
+        }
+    }
+
+    /** Re-check the on-device STT preference/model (e.g. after a download or toggle). */
+    fun refreshSttEngine() {
+        scope.launch {
+            sttOnDevice = settingsPreferences.loadSttOnDevice()
+            if (sttOnDevice && parakeet.isModelPresent() && !parakeet.isLoaded) parakeet.ensureLoaded()
+        }
+    }
+
+    /** True when the mic is currently served by the on-device parakeet model. */
+    fun isOnDeviceSttActive(): Boolean = sttOnDevice && parakeet.isLoaded
+
     fun stopListening() {
+        // Parakeet owns its own worker thread; stopping decodes any captured speech.
+        parakeet.stop()
         mainHandler.post {
             try {
                 speechRecognizer?.stopListening()

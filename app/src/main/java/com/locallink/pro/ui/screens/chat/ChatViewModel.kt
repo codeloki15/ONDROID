@@ -39,6 +39,9 @@ class ChatViewModel @Inject constructor(
     /** Composio OAuth links to open in a Custom Tab (agent is connecting an app in-flow). */
     val authUrlToOpen = chatRepository.authUrlToOpen
 
+    /** Fires once per completed voice capture — the UI uses it to dismiss voice mode. */
+    val voiceFinal = voiceService.finalResult
+
     init {
         voiceService.initialize()
         viewModelScope.launch { voiceService.autoTts.collect { e -> _uiState.update { it.copy(autoTts = e) } } }

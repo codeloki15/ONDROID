@@ -14,9 +14,10 @@ import com.locallink.pro.service.llm.AgentEvent
 import com.locallink.pro.service.llm.AgentOrchestrator
 import com.locallink.pro.service.llm.OpenRouterClient
 import com.locallink.pro.service.llm.OpenRouterUnavailable
+import com.locallink.pro.service.pilot.MemoryPilot
 import com.locallink.pro.service.pilot.OmniAccessibilityService
 import com.locallink.pro.service.pilot.OpenRouterPilotReasoner
-import com.locallink.pro.service.pilot.PilotController
+import com.locallink.pro.service.pilot.PilotActuator
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import java.util.UUID
@@ -30,8 +31,19 @@ class ChatRepository @Inject constructor(
     private val agent: AgentOrchestrator,
     private val openRouter: OpenRouterClient,
     private val settings: SettingsPreferences,
+    private val experiences: ExperienceStore,
 ) {
     private companion object { const val TAG = "ChatRepository" }
+
+    /** Pilot with experience memory: replay learned routines first, reason only when needed. */
+    private fun memoryPilot(actuator: PilotActuator): MemoryPilot = MemoryPilot(
+        reasoner = OpenRouterPilotReasoner(settings),
+        actuator = actuator,
+        screenshot = { com.locallink.pro.service.pilot.PilotProjectionHolder.capture() },
+        find = { task -> experiences.find(task) },
+        save = { task, steps -> experiences.save(task, steps) },
+        bump = { id -> experiences.bump(id) },
+    )
 
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
@@ -115,18 +127,12 @@ class ChatRepository @Inject constructor(
         if (!com.locallink.pro.service.pilot.PilotProjectionHolder.isReady) {
             com.locallink.pro.service.pilot.PilotProjectionRequest.request()
         }
-        val reasoner = OpenRouterPilotReasoner(settings)
-        val controller = PilotController(
-            reasoner = reasoner,
-            actuator = service.asActuator(),
-            screenshot = { com.locallink.pro.service.pilot.PilotProjectionHolder.capture() },
-        )
         // Run the loop in the SERVICE's scope, not here (viewModelScope), so it survives the app
         // going to the background when Pilot navigates into another app. Each event is persisted to
         // the DB from that scope; the UI "responding" flag is cleared when the terminal Final event
         // is persisted (see persistPilotEvent). runPilotFlow returns immediately.
         service.runPilotFlow(
-            flow = controller.run(task),
+            flow = memoryPilot(service.asActuator()).run(task),
             onEvent = { event -> persistPilotEvent(sessionId, event) },
             onComplete = { cause ->
                 if (cause != null && cause !is kotlinx.coroutines.CancellationException) {
@@ -152,10 +158,26 @@ class ChatRepository @Inject constructor(
         touchSession(sessionId)
         val service = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
         if (service == null) {
-            messageDao.insert(MessageEntity(sessionId = sessionId, role = "system",
-                text = "Error: enable Omni accessibility service in Settings → Accessibility → Omni.",
-                timestamp = System.currentTimeMillis()))
-            touchSession(sessionId); return
+            // No device control available — still answer in plain chat instead of hard-failing.
+            // Only phone-control tasks genuinely need the accessibility service.
+            _isAiResponding.value = true
+            try {
+                val reply = openRouter.plainChat(task)
+                if (reply.isNotBlank()) {
+                    messageDao.insert(MessageEntity(sessionId = sessionId, role = "assistant",
+                        text = reply, timestamp = System.currentTimeMillis()))
+                    _lastAssistantReply.value = reply
+                } else {
+                    messageDao.insert(MessageEntity(sessionId = sessionId, role = "system",
+                        text = "Error: no reply. For phone-control tasks, enable the Omni accessibility " +
+                            "service in Settings → Accessibility → OmniPro.",
+                        timestamp = System.currentTimeMillis()))
+                }
+            } finally {
+                _isAiResponding.value = false
+                touchSession(sessionId)
+            }
+            return
         }
         _isAiResponding.value = true
         // Ask for screen-capture consent for pilot todos if not already granted (best-effort).
@@ -170,12 +192,7 @@ class ChatRepository @Inject constructor(
             override suspend fun composio(todo: String): String = openRouter.plainChat(todo)
             override suspend fun pilot(todo: String): Boolean {
                 var stuck = false
-                val controller = com.locallink.pro.service.pilot.PilotController(
-                    reasoner = com.locallink.pro.service.pilot.OpenRouterPilotReasoner(settings),
-                    actuator = service.asActuator(),
-                    screenshot = { com.locallink.pro.service.pilot.PilotProjectionHolder.capture() },
-                )
-                controller.run(todo).collect { e ->
+                memoryPilot(service.asActuator()).run(todo).collect { e ->
                     when (e) {
                         is AgentEvent.Final -> if (e.text.startsWith("Stopped")) stuck = true
                         is AgentEvent.ToolCall, is AgentEvent.ToolResult -> persistPilotEvent(sessionId, e)
