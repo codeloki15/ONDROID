@@ -15,7 +15,7 @@ import com.locallink.pro.ui.screens.settings.SettingsScreen
 object Routes {
     const val GATE = "gate"
     const val SESSIONS = "sessions"
-    const val CHAT = "chat"            // chat?sessionId={id}
+    const val CHAT = "chat"            // chat?sessionId={id}&voice={bool}
     const val SETTINGS = "settings"
     const val CONNECT = "connect"
 }
@@ -35,16 +35,24 @@ fun LocalLinkNavGraph(navController: NavHostController) {
                 onOpenSession = { id ->
                     navController.navigate("${Routes.CHAT}?sessionId=${id ?: ""}")
                 },
+                onOpenVoice = {
+                    navController.navigate("${Routes.CHAT}?sessionId=&voice=true")
+                },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
         }
         composable(
-            "${Routes.CHAT}?sessionId={sessionId}",
-            arguments = listOf(navArgument("sessionId") { type = NavType.StringType; defaultValue = "" }),
+            "${Routes.CHAT}?sessionId={sessionId}&voice={voice}",
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType; defaultValue = "" },
+                navArgument("voice") { type = NavType.BoolType; defaultValue = false },
+            ),
         ) { entry ->
             val sid = entry.arguments?.getString("sessionId")?.ifBlank { null }
+            val voice = entry.arguments?.getBoolean("voice") ?: false
             ChatScreen(
                 sessionId = sid,
+                startVoice = voice,
                 onBack = { navController.popBackStack() },
                 onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
             )

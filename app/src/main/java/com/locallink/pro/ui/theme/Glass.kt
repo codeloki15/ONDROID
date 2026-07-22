@@ -9,53 +9,44 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Frosted-glass surface treatment for the "Amber Glass" theme.
- *
- * The ambient [GlassBackground] is a soft gradient with no hard edges, so a
- * translucent fill layered on top reads as frosted glass without needing a real
- * (expensive) backdrop blur. We add a top-edge light catch (a faint white→clear
- * vertical gradient) and a hairline border to sell the glass material.
+ * Charcoal surface treatment for the "Aurora Ink" theme. Solid #221f20 panels
+ * with generous radii; borders are opt-in (pass a visible [border]) since the
+ * reference design keeps filled cards edge-free and uses outlines only for
+ * ghost/outlined elements.
  */
 fun Modifier.glass(
     shape: Shape = RoundedCornerShape(24.dp),
     fill: Color = GlassFill,
-    border: Color = GlassBorder,
-    highlight: Boolean = true,
+    border: Color = Color.Transparent,
+    highlight: Boolean = false,
 ): Modifier = this
     .clip(shape)
     .background(fill, shape)
     .then(
-        if (highlight) Modifier.background(
-            Brush.verticalGradient(
-                0f to GlassHighlight,
-                0.35f to Color.Transparent,
-            ),
-            shape,
-        ) else Modifier,
+        if (border != Color.Transparent) Modifier.border(BorderStroke(1.dp, border), shape)
+        else Modifier,
     )
-    .border(BorderStroke(1.dp, border), shape)
 
-/** A frosted glass panel with content padding. */
+/** A charcoal panel with content padding. */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(24.dp),
     fill: Color = GlassFill,
-    border: Color = GlassBorder,
-    highlight: Boolean = true,
+    border: Color = Color.Transparent,
+    highlight: Boolean = false,
     contentPadding: Dp = 16.dp,
     content: @Composable () -> Unit,
 ) {
     Box(
         modifier
-            .glass(shape = shape, fill = fill, border = border, highlight = highlight)
+            .glass(shape = shape, fill = fill, border = border)
             .padding(contentPadding),
     ) { content() }
 }

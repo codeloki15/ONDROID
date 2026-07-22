@@ -1,17 +1,13 @@
 package com.locallink.pro.ui.theme
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 
-// ─── Extended OmniPin colors (accessible via LocalOmniPinColors) ─────────
+// ─── Extended OmniPro colors (accessible via LocalOmniPinColors) ─────────
 
 data class OmniPinColors(
     val userBubble: Color = OmniUserBubble,
@@ -33,25 +29,29 @@ data class OmniPinColors(
 
 val LocalOmniPinColors = staticCompositionLocalOf { OmniPinColors() }
 
-// ─── Amber Glass (dark) Material color scheme ────────────────────────────
+// ─── Aurora Ink Material color scheme ────────────────────────────────────
 
-private val GraphiteScheme = darkColorScheme(
+private val AuroraScheme = darkColorScheme(
     primary = OmniAccent,
     onPrimary = OmniTextOnAccent,
     primaryContainer = OmniAccentContainer,
     onPrimaryContainer = OmniAccentBright,
-    secondary = OmniAccentBright,
+    secondary = AuroraPink,
     onSecondary = OmniTextOnAccent,
     secondaryContainer = OmniSurface3,
     onSecondaryContainer = OmniText,
+    tertiary = AuroraRose,
+    onTertiary = OmniTextOnAccent,
     background = OmniBg,
     onBackground = OmniText,
-    surface = OmniSurface,
+    surface = OmniBg,
     onSurface = OmniText,
-    surfaceVariant = OmniSurface2,
+    surfaceVariant = OmniSurface,
     onSurfaceVariant = OmniTextDim,
-    surfaceContainer = OmniSurface2,
-    surfaceContainerHigh = OmniSurface3,
+    surfaceContainer = OmniSurface,
+    surfaceContainerLow = Color(0xFF1A1718),
+    surfaceContainerHigh = OmniSurface2,
+    surfaceContainerHighest = OmniSurface3,
     outline = OmniBorder,
     outlineVariant = OmniBorderSoft,
     error = OmniError,
@@ -61,33 +61,18 @@ private val GraphiteScheme = darkColorScheme(
     scrim = OmniScrim,
 )
 
-// ─── Typography (refined; tight tracking on headings) ────────────────────
-
-private val OmniPinTypography = Typography(
-    headlineMedium = TextStyle(fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 32.sp, letterSpacing = (-0.5).sp),
-    titleLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp, letterSpacing = (-0.3).sp),
-    titleMedium = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp, letterSpacing = (-0.1).sp),
-    titleSmall = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp),
-    bodyLarge = TextStyle(fontWeight = FontWeight.Normal, fontSize = 15.5.sp, lineHeight = 23.sp),
-    bodyMedium = TextStyle(fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp),
-    bodySmall = TextStyle(fontWeight = FontWeight.Normal, fontSize = 12.5.sp, lineHeight = 17.sp),
-    labelLarge = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 18.sp, letterSpacing = 0.1.sp),
-    labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp),
-    labelSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.4.sp),
-)
-
-// ─── Theme (always dark Graphite) ────────────────────────────────────────
+// ─── Theme (always dark Aurora Ink) ──────────────────────────────────────
 
 @Composable
 fun LocalLinkProTheme(
-    darkTheme: Boolean = true,        // OmniPin is dark-themed
+    darkTheme: Boolean = true,        // OmniPro is dark-themed
     dynamicColor: Boolean = false,    // keep our identity, ignore Material You
     content: @Composable () -> Unit
 ) {
     CompositionLocalProvider(LocalOmniPinColors provides OmniPinColors()) {
         MaterialTheme(
-            colorScheme = GraphiteScheme,
-            typography = OmniPinTypography,
+            colorScheme = AuroraScheme,
+            typography = OmniTypography,
             content = content,
         )
     }

@@ -1,67 +1,81 @@
 package com.locallink.pro.ui.theme
 
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 // ─────────────────────────────────────────────────────────────────────────
-// OmniPin — "Graphite + Indigo" design system
-// Neutral cool-charcoal surfaces let a single indigo accent pop. Off-white
-// text, restrained semantics. Clean and high-contrast (ChatGPT/Claude-like) —
-// solid surfaces, not muddy translucency.
+// OmniPro — "Aurora Ink" design system
+// Near-black ink surfaces, one hero violet→pink gradient, dusty-rose support.
+// Reference palette: #ac1ed6 · #c26e73 · #090607 · #221f20, font Epilogue.
 // ─────────────────────────────────────────────────────────────────────────
 
-// ─── Base surfaces — layered neutral cool charcoal (each step ~+4% L) ─────
-val OmniBg          = Color(0xFF0F1115) // app base (near-black slate)
-val OmniSurface     = Color(0xFF171A21) // cards / sheets
-val OmniSurface2    = Color(0xFF1F232C) // elevated card / input field
-val OmniSurface3    = Color(0xFF2A2F3A) // hover / pressed / chips
-val OmniScrim       = Color(0xCC0A0C10)
+// ─── Base surfaces — ink ──────────────────────────────────────────────────
+val OmniBg          = Color(0xFF090607) // app base (near-black ink)
+val OmniSurface     = Color(0xFF221F20) // cards / sheets / AI bubbles
+val OmniSurface2    = Color(0xFF2A2627) // elevated card / input field
+val OmniSurface3    = Color(0xFF353031) // hover / pressed / chips
+val OmniScrim       = Color(0xCC090607)
 
-// ─── "Glass" fills — now SOLID-ish neutral surfaces (kept names for reuse) ─
-val GlassFill       = Color(0xFF1A1E26) // default panel (opaque, clean)
-val GlassFillStrong = Color(0xFF20242E) // input pill / stronger panel
-val GlassFillFaint  = Color(0xFF15181F) // subtle chip / code block
-val GlassHighlight  = Color(0x0FFFFFFF) // very faint top-edge light
-val GlassBorder     = Color(0xFF2A2F3A) // hairline
-val GlassBorderSoft = Color(0xFF20242E) // softer hairline
+// ─── Fills (legacy "glass" names kept for reuse) ──────────────────────────
+val GlassFill       = Color(0xFF221F20) // default panel
+val GlassFillStrong = Color(0xFF272324) // input pill / stronger panel
+val GlassFillFaint  = Color(0xFF1A1718) // subtle chip / code block
+val GlassHighlight  = Color(0x0AFFFFFF) // faint top-edge light
+val GlassBorder     = Color(0xFF393435) // hairline outline
+val GlassBorderSoft = Color(0xFF2B2728) // softer hairline
 
-// ─── Ambient background stops — neutral, near-flat (barely-there depth) ────
-val GlowAmber       = Color(0xFF6D7CFF) // (reused name) faint indigo lift
-val GlowBronze      = Color(0xFF1A1E2E) // cool deep corner
-val GlowEdge        = Color(0xFF0B0D11) // edges fade to base
+// ─── Aurora accents ───────────────────────────────────────────────────────
+val AuroraViolet    = Color(0xFFAC1ED6) // hero violet
+val AuroraVioletHi  = Color(0xFFC957E8) // lighter violet (active / glow)
+val AuroraVioletLo  = Color(0xFF8A16AE) // pressed violet
+val AuroraPink      = Color(0xFFE066B4) // gradient end pink
+val AuroraRose      = Color(0xFFC26E73) // dusty rose (support)
+val AuroraPeach     = Color(0xFFE8A28A) // warm highlight in aurora glow
 
-// ─── Borders / hairlines ────────────────────────────────────────────────
+// ─── Signature gradients ──────────────────────────────────────────────────
+/** Hero brand gradient — buttons, user bubbles, orbs. */
+val AuroraBrush = Brush.linearGradient(listOf(AuroraViolet, AuroraPink))
+/** Softer diagonal variant for large fills (user bubble). */
+val BubbleBrush = Brush.linearGradient(listOf(Color(0xFF9E22CC), Color(0xFFD960B0)))
+
+// ─── Ambient glow stops (aurora header) ───────────────────────────────────
+val GlowAmber       = Color(0xFFB44BD8) // (legacy name) violet bloom
+val GlowBronze      = Color(0xFFC26E73) // rose bloom
+val GlowEdge        = Color(0xFF090607) // edges fade to ink
+
+// ─── Borders / hairlines ──────────────────────────────────────────────────
 val OmniBorder      = GlassBorder
 val OmniBorderSoft  = GlassBorderSoft
-val OmniBorderFocus = Color(0xFF3A4150)
+val OmniBorderFocus = Color(0xFF57474F)
 
-// ─── Text — cool off-white ─────────────────────────────────────────────────
-val OmniText        = Color(0xFFECEEF3) // primary (off-white)
-val OmniTextDim     = Color(0xFFAEB4C2) // secondary
-val OmniTextFaint   = Color(0xFF8A90A0) // tertiary / placeholders
-val OmniTextOnAccent = Color(0xFFFFFFFF) // white text on indigo
+// ─── Text — warm off-white ────────────────────────────────────────────────
+val OmniText        = Color(0xFFF7F3F5) // primary
+val OmniTextDim     = Color(0xFFB9B1B5) // secondary
+val OmniTextFaint   = Color(0xFF878083) // tertiary / placeholders
+val OmniTextOnAccent = Color(0xFFFFFFFF)
 
-// ─── Accent — indigo (single hero) + container ─────────────────────────────
-val OmniAccent      = Color(0xFF6D7CFF) // indigo
-val OmniAccentBright = Color(0xFF93A0FF) // lighter indigo (active/glow)
-val OmniAccentDim   = Color(0xFF5260E0) // pressed indigo
-val OmniAccentContainer = Color(0xFF20243B) // indigo-tinted dark surface
+// ─── Accent aliases (violet is the single hero) ───────────────────────────
+val OmniAccent      = AuroraViolet
+val OmniAccentBright = AuroraVioletHi
+val OmniAccentDim   = AuroraVioletLo
+val OmniAccentContainer = Color(0xFF351A3F) // violet-tinted dark surface
 
-// ─── Chat bubbles ──────────────────────────────────────────────────────────
-val OmniUserBubble  = Color(0xFF2A2F52) // indigo-tinted (user)
-val OmniAiBubble    = Color(0xFF1A1E26) // neutral surface (assistant)
+// ─── Chat bubbles ─────────────────────────────────────────────────────────
+val OmniUserBubble  = Color(0xFFAC1ED6) // painted with BubbleBrush; solid fallback
+val OmniAiBubble    = Color(0xFF221F20) // charcoal (assistant)
 
-// ─── Semantic ──────────────────────────────────────────────────────────────
-val OmniSuccess     = Color(0xFF3DD68C)
-val OmniSuccessDim  = Color(0xFF12321F)
-val OmniWarning     = Color(0xFFF5B14B)
-val OmniError       = Color(0xFFFF6B6B)
+// ─── Semantic ─────────────────────────────────────────────────────────────
+val OmniSuccess     = Color(0xFF4CD990)
+val OmniSuccessDim  = Color(0xFF14301F)
+val OmniWarning     = Color(0xFFF0B45C)
+val OmniError       = Color(0xFFF06A6A)
 val OmniErrorDim    = Color(0xFF3A1A1F)
 
-// ─── Voice / live ──────────────────────────────────────────────────────────
-val OmniVoice       = Color(0xFF6D7CFF) // indigo (on-brand) for listening
-val OmniVoicePulse  = Color(0x336D7CFF)
+// ─── Voice / live ─────────────────────────────────────────────────────────
+val OmniVoice       = AuroraPink
+val OmniVoicePulse  = Color(0x33E066B4)
 
-// ─── Back-compat aliases (older screens reference these names) ─────────────
+// ─── Back-compat aliases (older call sites reference these names) ─────────
 val OmniBackground       = OmniBg
 val OmniSurfaceVariant   = OmniSurface2
 val OmniSurfaceElevated  = OmniSurface2

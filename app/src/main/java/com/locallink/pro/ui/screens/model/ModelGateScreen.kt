@@ -1,10 +1,11 @@
 package com.locallink.pro.ui.screens.model
 
-import androidx.compose.foundation.background
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -14,11 +15,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.locallink.pro.service.llm.ModelState
+import com.locallink.pro.ui.components.GradientOrb
+import com.locallink.pro.ui.components.GradientPill
 import com.locallink.pro.ui.theme.*
 
 @Composable
@@ -29,47 +32,51 @@ fun ModelGateScreen(
     val state by vm.state.collectAsState()
     LaunchedEffect(state) { if (state is ModelState.Ready) onReady() }
 
-    GlassBackground {
-        Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            Box(
-                Modifier.size(76.dp)
-                    .glass(shape = RoundedCornerShape(24.dp), fill = OmniAccentContainer),
-                contentAlignment = Alignment.Center,
-            ) { Text("✦", color = OmniAccentBright, style = MaterialTheme.typography.headlineMedium) }
+    val t = rememberInfiniteTransition(label = "gate")
+    val breath by t.animateFloat(
+        0.96f, 1.04f,
+        infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+        label = "breath",
+    )
 
-            Text("Omni", style = MaterialTheme.typography.headlineMedium, color = OmniText)
+    AuroraBackground(glow = 0.7f) {
+        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                GradientOrb(
+                    size = 96.dp, glow = true,
+                    modifier = Modifier.graphicsLayer { scaleX = breath; scaleY = breath },
+                )
 
-            when (val s = state) {
-                is ModelState.Checking -> {
-                    CircularProgressIndicator(color = OmniAccent)
-                    Text("Preparing…", color = OmniTextDim, style = MaterialTheme.typography.bodyMedium)
-                }
-                is ModelState.Ready -> Text("Ready", color = OmniSuccess)
-                is ModelState.Missing -> {
-                    Text("On-device model not found", color = OmniText, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Push a model to:\n${s.expectedPath}\n\nOr add an OpenRouter key in Settings to use a cloud model. Then tap Retry.",
-                        color = OmniTextFaint, textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Button(
-                        onClick = { vm.prepare() },
-                        colors = ButtonDefaults.buttonColors(containerColor = OmniAccent, contentColor = OmniTextOnAccent),
-                    ) { Text("Retry") }
-                }
-                is ModelState.Error -> {
-                    Text("Error: ${s.message}", color = OmniError, textAlign = TextAlign.Center)
-                    Button(
-                        onClick = { vm.prepare() },
-                        colors = ButtonDefaults.buttonColors(containerColor = OmniAccent, contentColor = OmniTextOnAccent),
-                    ) { Text("Retry") }
+                Text("OmniPro", style = MaterialTheme.typography.displayMedium, color = OmniText)
+
+                when (val s = state) {
+                    is ModelState.Checking -> {
+                        CircularProgressIndicator(color = AuroraVioletHi, strokeWidth = 3.dp, modifier = Modifier.size(30.dp))
+                        Text("Preparing…", color = OmniTextDim, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is ModelState.Ready -> Text("Ready", color = OmniSuccess, style = MaterialTheme.typography.bodyMedium)
+                    is ModelState.Missing -> {
+                        Text("No model configured", color = OmniText, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Add an OpenRouter key in Settings to use a cloud model, " +
+                                "or push an on-device model to:\n${s.expectedPath}",
+                            color = OmniTextFaint, textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        GradientPill("Retry", onClick = { vm.prepare() })
+                    }
+                    is ModelState.Error -> {
+                        Text(
+                            "Error: ${s.message}", color = OmniError,
+                            textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium,
+                        )
+                        GradientPill("Retry", onClick = { vm.prepare() })
+                    }
                 }
             }
-        }
         }
     }
 }
