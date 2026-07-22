@@ -109,31 +109,60 @@ class ChatRepository @Inject constructor(
 
         _isAiResponding.value = true
         _streamingText.value = ""
-        try {
-            val reasoner = OpenRouterPilotReasoner(settings)
-            val controller = PilotController(
-                reasoner = reasoner,
-                perceive = service::snapshot,
-                tap = service::tapElement,
-                cancelled = { service.cancelFlag.get() },
-            )
-            service.showStop()
-            try {
-                runEngine(sessionId, controller.run(task))
-            } finally {
-                service.hideStop()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "runPilot failed", e)
-            messageDao.insert(MessageEntity(
-                sessionId = sessionId, role = "system",
-                text = "Error: ${e.message ?: e.javaClass.simpleName}", timestamp = System.currentTimeMillis(),
+
+        val reasoner = OpenRouterPilotReasoner(settings)
+        val controller = PilotController(
+            reasoner = reasoner,
+            perceive = service::snapshot,
+            tap = service::tapElement,
+            cancelled = { service.cancelFlag.get() },
+        )
+        // Run the loop in the SERVICE's scope, not here (viewModelScope), so it survives the app
+        // going to the background when Pilot navigates into another app. Each event is persisted to
+        // the DB from that scope; the UI "responding" flag is cleared when the terminal Final event
+        // is persisted (see persistPilotEvent). runPilotFlow returns immediately.
+        service.runPilotFlow(
+            flow = controller.run(task),
+            onEvent = { event -> persistPilotEvent(sessionId, event) },
+            onComplete = { cause ->
+                if (cause != null && cause !is kotlinx.coroutines.CancellationException) {
+                    Log.e(TAG, "runPilot failed", cause)
+                    messageDao.insert(MessageEntity(
+                        sessionId = sessionId, role = "system",
+                        text = "Error: ${cause.message ?: cause.javaClass.simpleName}",
+                        timestamp = System.currentTimeMillis(),
+                    ))
+                }
+                _streamingText.value = ""
+                _isAiResponding.value = false
+                touchSession(sessionId)
+            },
+        )
+    }
+
+    /** Persist one Pilot [AgentEvent] to the chat DB (runs in the service scope). */
+    private suspend fun persistPilotEvent(sessionId: String, event: AgentEvent) {
+        when (event) {
+            is AgentEvent.Token -> _streamingText.value = event.text
+            is AgentEvent.ToolCall -> messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "tool_call",
+                text = "${event.name}(${event.argsJson})", timestamp = System.currentTimeMillis(),
             ))
-        } finally {
-            _streamingText.value = ""
-            _isAiResponding.value = false
-            touchSession(sessionId)
+            is AgentEvent.ToolResult -> messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "tool_result",
+                text = "${event.name} → ${event.result}", timestamp = System.currentTimeMillis(),
+            ))
+            is AgentEvent.OpenAuthUrl -> { /* pilot has no auth flow */ }
+            is AgentEvent.Final -> {
+                messageDao.insert(MessageEntity(
+                    sessionId = sessionId, role = "assistant",
+                    text = event.text, timestamp = System.currentTimeMillis(),
+                ))
+                _streamingText.value = ""
+                _isAiResponding.value = false
+            }
         }
+        touchSession(sessionId)
     }
 
     /**

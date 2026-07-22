@@ -6,13 +6,45 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.locallink.pro.service.llm.AgentEvent
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
 import java.util.concurrent.atomic.AtomicBoolean
 
 class OmniAccessibilityService : AccessibilityService() {
 
     val cancelFlag = AtomicBoolean(false)
     private var overlay: PilotOverlay? = null
+
+    // A scope tied to the SERVICE, not the UI. The Pilot loop runs here so it SURVIVES the app
+    // going to the background — moving to another app used to cancel viewModelScope and kill the
+    // loop ("stops as soon as it leaves the chat screen"). The accessibility service is long-lived.
+    private val pilotScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Run a Pilot [flow] to completion in the service's own scope, forwarding each [AgentEvent]
+     * to [onEvent]. Returns immediately; the loop keeps running even if the chat UI backgrounds.
+     * [onComplete] is always invoked at the end (normal finish, error, or cancel) with the error
+     * if one occurred — so callers can reset UI state and surface failures even when no Final
+     * event was emitted.
+     */
+    fun runPilotFlow(
+        flow: Flow<AgentEvent>,
+        onEvent: suspend (AgentEvent) -> Unit,
+        onComplete: suspend (Throwable?) -> Unit = {},
+    ) {
+        showStop()
+        flow.onEach { onEvent(it) }
+            .onCompletion { cause -> hideStop(); onComplete(cause) }
+            .launchIn(pilotScope)
+    }
 
     override fun onServiceConnected() {
         instance = this
@@ -21,6 +53,7 @@ class OmniAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         instance = null
+        pilotScope.cancel()
         super.onDestroy()
     }
 
