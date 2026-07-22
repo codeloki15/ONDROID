@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.content.Context
+import android.media.projection.MediaProjectionManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +17,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import com.locallink.pro.data.local.SettingsPreferences
+import com.locallink.pro.service.pilot.PilotProjectionHolder
+import com.locallink.pro.service.pilot.PilotProjectionRequest
+import com.locallink.pro.service.pilot.PilotProjectionService
 import com.locallink.pro.service.voice.VoiceLoopService
 import com.locallink.pro.ui.navigation.LocalLinkNavGraph
 import com.locallink.pro.ui.theme.LocalLinkProTheme
@@ -33,9 +38,30 @@ class MainActivity : ComponentActivity() {
         // Permissions granted or denied — UI will react via state
     }
 
+    // Screen-capture consent for Omni Pilot vision. On grant, start the projection service.
+    private val projectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == RESULT_OK && data != null) {
+            PilotProjectionService.start(this, result.resultCode, data)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestPermissions()
+
+        // Pilot asks (via this flow) for screen-capture consent when a run needs vision and none
+        // is active yet. We prompt once; the projection then persists for the session.
+        lifecycleScope.launch {
+            PilotProjectionRequest.requests.collect {
+                if (!PilotProjectionHolder.isReady) {
+                    val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    runCatching { projectionLauncher.launch(mpm.createScreenCaptureIntent()) }
+                }
+            }
+        }
 
         // Resume hands-free listening if the user left it on (Activity is visible → FGS allowed).
         lifecycleScope.launch {

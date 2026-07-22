@@ -82,6 +82,11 @@
                 android:resource="@xml/omni_accessibility_config" />
         </service>
 
+        <service
+            android:name=".service.pilot.PilotProjectionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

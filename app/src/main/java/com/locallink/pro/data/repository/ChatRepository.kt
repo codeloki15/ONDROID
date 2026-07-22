@@ -110,8 +110,17 @@ class ChatRepository @Inject constructor(
         _isAiResponding.value = true
         _streamingText.value = ""
 
+        // Ask the Activity to grant screen-capture consent for vision if we don't have it yet.
+        // Best-effort: if declined or the Activity isn't foreground, the loop runs tree-only.
+        if (!com.locallink.pro.service.pilot.PilotProjectionHolder.isReady) {
+            com.locallink.pro.service.pilot.PilotProjectionRequest.request()
+        }
         val reasoner = OpenRouterPilotReasoner(settings)
-        val controller = PilotController(reasoner = reasoner, actuator = service.asActuator())
+        val controller = PilotController(
+            reasoner = reasoner,
+            actuator = service.asActuator(),
+            screenshot = { com.locallink.pro.service.pilot.PilotProjectionHolder.capture() },
+        )
         // Run the loop in the SERVICE's scope, not here (viewModelScope), so it survives the app
         // going to the background when Pilot navigates into another app. Each event is persisted to
         // the DB from that scope; the UI "responding" flag is cleared when the terminal Final event

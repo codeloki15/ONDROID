@@ -39,6 +39,8 @@ interface PilotActuator {
 class PilotController(
     private val reasoner: PilotReasoner,
     private val actuator: PilotActuator,
+    /** Optional per-step screenshot for vision. Returns null → tree-only for that step. */
+    private val screenshot: suspend () -> ByteArray? = { null },
     private val maxSteps: Int = 25,
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
@@ -51,7 +53,8 @@ class PilotController(
             if (actuator.cancelled()) { emit(AgentEvent.Final("Stopped.")); return@flow }
             val elements = actuator.perceive()
             val screenSig = elements.joinToString("|") { "${it.text}:${it.bounds.joinToString(",")}" }
-            val (name, args) = reasoner.nextAction(task, elements, /*screenshot*/ null, history)
+            val shot = screenshot()
+            val (name, args) = reasoner.nextAction(task, elements, shot, history)
             val action = PilotActionParser.parse(name, args)
 
             // Terminal actions first.
