@@ -14,6 +14,9 @@ import com.locallink.pro.service.llm.AgentEvent
 import com.locallink.pro.service.llm.AgentOrchestrator
 import com.locallink.pro.service.llm.OpenRouterClient
 import com.locallink.pro.service.llm.OpenRouterUnavailable
+import com.locallink.pro.service.pilot.OmniAccessibilityService
+import com.locallink.pro.service.pilot.OpenRouterPilotReasoner
+import com.locallink.pro.service.pilot.PilotController
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import java.util.UUID
@@ -75,6 +78,61 @@ class ChatRepository @Inject constructor(
         )
         touchSession(sessionId)
         generateReply(sessionId, text)
+    }
+
+    /**
+     * DEBUG thin-slice trigger for Omni Pilot: perceive the screen via the AccessibilityService,
+     * reason one action per step with the cloud vision model, and tap. Persists the user turn and
+     * streams the pilot's [AgentEvent]s into the chat exactly like [send]. Requires the
+     * OmniAccessibilityService to be enabled; MediaProjection (screenshot) is NOT wired here —
+     * [PilotController] passes a null screenshot, so this runs element-only. (Device-side follow-up.)
+     */
+    suspend fun runPilot(task: String) {
+        val now = System.currentTimeMillis()
+        val sessionId = ensureSession(task, now)
+        messageDao.insert(
+            MessageEntity(sessionId = sessionId, role = "user", text = "/pilot $task", timestamp = now)
+        )
+        touchSession(sessionId)
+
+        val service = OmniAccessibilityService.instance
+        if (service == null) {
+            messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "system",
+                text = "Error: Omni Pilot accessibility service is not enabled. " +
+                    "Enable it in Settings → Accessibility → Omni, then retry.",
+                timestamp = System.currentTimeMillis(),
+            ))
+            touchSession(sessionId)
+            return
+        }
+
+        _isAiResponding.value = true
+        _streamingText.value = ""
+        try {
+            val reasoner = OpenRouterPilotReasoner(settings)
+            val controller = PilotController(
+                reasoner = reasoner,
+                perceive = service::snapshot,
+                tap = service::tapElement,
+                cancelled = { service.cancelFlag.get() },
+            )
+            service.showStop()
+            try {
+                runEngine(sessionId, controller.run(task))
+            } finally {
+                service.hideStop()
+            }
+        } catch (e: Exception) {
+            messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "system",
+                text = "Error: ${e.message}", timestamp = System.currentTimeMillis(),
+            ))
+        } finally {
+            _streamingText.value = ""
+            _isAiResponding.value = false
+            touchSession(sessionId)
+        }
     }
 
     /**
