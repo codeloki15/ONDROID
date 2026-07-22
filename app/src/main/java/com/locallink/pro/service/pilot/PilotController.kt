@@ -1,8 +1,10 @@
 package com.locallink.pro.service.pilot
 
 import com.locallink.pro.service.llm.AgentEvent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import java.util.UUID
 
 fun interface PilotReasoner {
@@ -52,5 +54,5 @@ class PilotController(
             lastSig = sig
         }
         emit(AgentEvent.Final("Stopped after $maxSteps steps."))
-    }
+    }.flowOn(Dispatchers.IO) // network (reasoner) + a11y calls must run off the main thread
 }

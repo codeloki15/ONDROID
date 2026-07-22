@@ -124,9 +124,10 @@ class ChatRepository @Inject constructor(
                 service.hideStop()
             }
         } catch (e: Exception) {
+            Log.e(TAG, "runPilot failed", e)
             messageDao.insert(MessageEntity(
                 sessionId = sessionId, role = "system",
-                text = "Error: ${e.message}", timestamp = System.currentTimeMillis(),
+                text = "Error: ${e.message ?: e.javaClass.simpleName}", timestamp = System.currentTimeMillis(),
             ))
         } finally {
             _streamingText.value = ""
