@@ -144,6 +144,66 @@ class ChatRepository @Inject constructor(
         )
     }
 
+    /** Planning-agent entry: plan → route todos to chat/composio/pilot → execute, with input pauses. */
+    suspend fun runAgent(task: String) {
+        val now = System.currentTimeMillis()
+        val sessionId = ensureSession(task, now)
+        messageDao.insert(MessageEntity(sessionId = sessionId, role = "user", text = task, timestamp = now))
+        touchSession(sessionId)
+        val service = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
+        if (service == null) {
+            messageDao.insert(MessageEntity(sessionId = sessionId, role = "system",
+                text = "Error: enable Omni accessibility service in Settings → Accessibility → Omni.",
+                timestamp = System.currentTimeMillis()))
+            touchSession(sessionId); return
+        }
+        _isAiResponding.value = true
+        // Ask for screen-capture consent for pilot todos if not already granted (best-effort).
+        if (!com.locallink.pro.service.pilot.PilotProjectionHolder.isReady) {
+            com.locallink.pro.service.pilot.PilotProjectionRequest.request()
+        }
+        val runner = object : com.locallink.pro.service.pilot.ChannelRunner {
+            override suspend fun chat(todo: String): String {
+                val sb = StringBuilder()
+                openRouter.run(emptyList(), todo) { _, _ -> true }.collect { e ->
+                    if (e is AgentEvent.Final) sb.append(e.text)
+                }
+                return sb.toString()
+            }
+            override suspend fun composio(todo: String): String {
+                var out = ""
+                openRouter.run(emptyList(), todo) { _, _ -> true }.collect { e ->
+                    if (e is AgentEvent.Final) out = e.text
+                    persistPilotEvent(sessionId, e)
+                }
+                return out
+            }
+            override suspend fun pilot(todo: String): Boolean {
+                var stuck = false
+                val controller = com.locallink.pro.service.pilot.PilotController(
+                    reasoner = com.locallink.pro.service.pilot.OpenRouterPilotReasoner(settings),
+                    actuator = service.asActuator(),
+                    screenshot = { com.locallink.pro.service.pilot.PilotProjectionHolder.capture() },
+                )
+                controller.run(todo).collect { e ->
+                    if (e is AgentEvent.Final && e.text.startsWith("Stopped")) stuck = true
+                    persistPilotEvent(sessionId, e)
+                }
+                return !stuck
+            }
+            override suspend fun requestInput(question: String, reason: String?): String? =
+                service.requestInput(question, reason)
+        }
+        val executor = com.locallink.pro.service.pilot.PlanExecutor(
+            com.locallink.pro.service.pilot.OpenRouterPlanner(settings), runner,
+        )
+        service.runPilotFlow(
+            flow = executor.run(task),
+            onEvent = { persistPilotEvent(sessionId, it) },
+            onComplete = { _ -> _isAiResponding.value = false; touchSession(sessionId) },
+        )
+    }
+
     /** Persist one Pilot [AgentEvent] to the chat DB (runs in the service scope). */
     private suspend fun persistPilotEvent(sessionId: String, event: AgentEvent) {
         when (event) {
@@ -165,6 +225,22 @@ class ChatRepository @Inject constructor(
                 _streamingText.value = ""
                 _isAiResponding.value = false
             }
+            is AgentEvent.Plan -> messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "system",
+                text = "🗒 Plan:\n" + event.todos.mapIndexed { i, t ->
+                    "${i + 1}. ${t.text} [${t.channel.name.lowercase()}]" +
+                        if (t.needsInput) " (needs input)" else ""
+                }.joinToString("\n"),
+                timestamp = System.currentTimeMillis(),
+            ))
+            is AgentEvent.TodoStatus -> if (event.done) messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "system",
+                text = "✓ ${event.text}", timestamp = System.currentTimeMillis(),
+            ))
+            is AgentEvent.InputRequested -> messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "system",
+                text = "⌨ Input requested: ${event.question}", timestamp = System.currentTimeMillis(),
+            ))
         }
         touchSession(sessionId)
     }
@@ -264,6 +340,8 @@ class ChatRepository @Inject constructor(
                     )
                     _lastAssistantReply.value = event.text
                 }
+                // Planning-agent-only events; the plain chat/composio engine never emits these.
+                is AgentEvent.Plan, is AgentEvent.TodoStatus, is AgentEvent.InputRequested -> {}
             }
         }
     }

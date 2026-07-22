@@ -76,20 +76,25 @@ class ChatViewModel @Inject constructor(
         val imageUri = _uiState.value.pendingImageUri
         if (messageText.isBlank() && imageUri == null) return
 
-        // DEBUG thin-slice trigger: "/pilot <task>" runs the Omni Pilot on-device action loop
-        // instead of a normal chat turn. (No real "pilot intent" detection yet — magic string only.)
         val trimmed = messageText.trim()
+        _uiState.update { it.copy(inputText = "", pendingImageUri = null) }
+
+        // Escape hatch: "/pilot <task>" forces the raw device-control loop (debug/bypass planner).
         if (trimmed.startsWith("/pilot ", ignoreCase = true)) {
             val task = trimmed.substring("/pilot ".length).trim()
-            _uiState.update { it.copy(inputText = "", pendingImageUri = null) }
             if (task.isNotBlank()) viewModelScope.launch { chatRepository.runPilot(task) }
             return
         }
 
-        _uiState.update { it.copy(inputText = "", pendingImageUri = null) }
+        // Default: route every message through the planning agent (no prefix). It decides
+        // chat / composio / pilot per todo. Image messages still use the plain chat send.
         viewModelScope.launch {
-            val bitmap: Bitmap? = imageUri?.let { imageService.loadForInference(it) }
-            chatRepository.send(text = messageText, image = bitmap, imageUri = imageUri?.toString(), isVoice = isVoice)
+            if (imageUri == null) {
+                chatRepository.runAgent(messageText)
+            } else {
+                val bitmap: Bitmap? = imageService.loadForInference(imageUri)
+                chatRepository.send(text = messageText, image = bitmap, imageUri = imageUri.toString(), isVoice = isVoice)
+            }
         }
     }
 

@@ -53,6 +53,7 @@ class OmniAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         instance = null
+        inputOverlay?.hide()
         pilotScope.cancel()
         super.onDestroy()
     }
@@ -62,6 +63,27 @@ class OmniAccessibilityService : AccessibilityService() {
 
     fun showStop() { cancelFlag.set(false); overlay?.show() }
     fun hideStop() { overlay?.hide() }
+
+    private var inputOverlay: InputRequestOverlay? = null
+
+    /** Show the input floater and suspend until the user submits (returns text) or cancels (null). */
+    suspend fun requestInput(question: String, reason: String?): String? {
+        val deferred = CompletableDeferred<String?>()
+        kotlinx.coroutines.withContext(Dispatchers.Main) {
+            inputOverlay = InputRequestOverlay(
+                this@OmniAccessibilityService,
+                onSubmit = { text -> if (!deferred.isCompleted) deferred.complete(text) },
+                onCancel = { if (!deferred.isCompleted) deferred.complete(null) },
+            ).also { it.show(question, reason) }
+        }
+        return try {
+            deferred.await()
+        } finally {
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                inputOverlay?.hide(); inputOverlay = null
+            }
+        }
+    }
 
     /** Expose this service to the Pilot loop as a [PilotActuator]. */
     fun asActuator(): PilotActuator = object : PilotActuator {

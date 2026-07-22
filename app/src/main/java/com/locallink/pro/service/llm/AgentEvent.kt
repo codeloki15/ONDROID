@@ -16,4 +16,13 @@ sealed interface AgentEvent {
 
     /** The final natural-language reply; loop is done. */
     data class Final(val text: String) : AgentEvent
+
+    /** The agent's plan (list of todos) — render it in the chat. */
+    data class Plan(val todos: List<com.locallink.pro.service.pilot.Todo>) : AgentEvent
+
+    /** A todo started (done=false) or finished (done=true). */
+    data class TodoStatus(val index: Int, val text: String, val done: Boolean) : AgentEvent
+
+    /** The agent needs user input; show the floating overlay and wait. */
+    data class InputRequested(val question: String, val reason: String?) : AgentEvent
 }
