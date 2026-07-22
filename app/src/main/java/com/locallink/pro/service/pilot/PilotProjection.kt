@@ -24,11 +24,15 @@ import kotlinx.coroutines.flow.SharedFlow
  * run simply proceeds tree-only.
  */
 object PilotProjectionRequest {
+    // replay=1 so a request emitted before MainActivity's collector subscribes (e.g. right after
+    // a cold launch) is still delivered when the Activity comes up.
     private val _requests = MutableSharedFlow<Unit>(
-        extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        replay = 1, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val requests: SharedFlow<Unit> = _requests
     fun request() { _requests.tryEmit(Unit) }
+    /** Clear the replayed request once consent is granted, so it isn't re-prompted. */
+    fun consumed() { _requests.resetReplayCache() }
 }
 
 /**

@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == RESULT_OK && data != null) {
             PilotProjectionService.start(this, result.resultCode, data)
         }
+        PilotProjectionRequest.consumed()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

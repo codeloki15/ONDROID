@@ -81,6 +81,10 @@ class PilotController(
             val (ok, note) = execute(action, elements)
             emit(AgentEvent.ToolResult(id, name, if (ok) note else "failed: $note", ok))
             history.add(note)
+            // Let the screen settle after actions that navigate/transition, so the NEXT perceive
+            // (and screenshot) reflect the new screen — this is what stops the model re-issuing the
+            // same tap because the old screen was still showing.
+            if (ok && action.changesScreen()) kotlinx.coroutines.delay(SETTLE_MS)
         }
         emit(AgentEvent.Final("Stopped after $maxSteps steps."))
     }.flowOn(Dispatchers.IO) // network (reasoner) + a11y calls must run off the main thread
@@ -120,4 +124,17 @@ class PilotController(
     }
 
     private fun PilotElement.label(): String = text ?: desc ?: cls ?: ""
+
+    /** Actions that typically change the screen and warrant a settle delay before re-perceiving. */
+    private fun PilotAction.changesScreen(): Boolean = when (this) {
+        is PilotAction.Tap, is PilotAction.DoubleTap, is PilotAction.LaunchApp,
+        is PilotAction.Back, is PilotAction.Home, is PilotAction.Recents,
+        is PilotAction.Notifications, is PilotAction.QuickSettings,
+        is PilotAction.Swipe, is PilotAction.Scroll -> true
+        else -> false
+    }
+
+    private companion object {
+        const val SETTLE_MS = 700L
+    }
 }
