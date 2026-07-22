@@ -75,6 +75,17 @@ class ChatViewModel @Inject constructor(
         val messageText = text ?: _uiState.value.inputText
         val imageUri = _uiState.value.pendingImageUri
         if (messageText.isBlank() && imageUri == null) return
+
+        // DEBUG thin-slice trigger: "/pilot <task>" runs the Omni Pilot on-device action loop
+        // instead of a normal chat turn. (No real "pilot intent" detection yet — magic string only.)
+        val trimmed = messageText.trim()
+        if (trimmed.startsWith("/pilot ", ignoreCase = true)) {
+            val task = trimmed.substring("/pilot ".length).trim()
+            _uiState.update { it.copy(inputText = "", pendingImageUri = null) }
+            if (task.isNotBlank()) viewModelScope.launch { chatRepository.runPilot(task) }
+            return
+        }
+
         _uiState.update { it.copy(inputText = "", pendingImageUri = null) }
         viewModelScope.launch {
             val bitmap: Bitmap? = imageUri?.let { imageService.loadForInference(it) }
