@@ -25,4 +25,7 @@ sealed interface AgentEvent {
 
     /** The agent needs user input; show the floating overlay and wait. */
     data class InputRequested(val question: String, val reason: String?) : AgentEvent
+
+    /** A mid-plan assistant message (e.g. a chat/composio todo's reply) — persists but doesn't end the run. */
+    data class AssistantSay(val text: String) : AgentEvent
 }

@@ -37,8 +37,9 @@ class PlanExecutor(
             }
 
             val ok: Boolean = when (todo.channel) {
-                Channel.CHAT -> { emit(AgentEvent.Token(runner.chat(todo.text))); true }
-                Channel.COMPOSIO -> { runner.composio(todo.text); true }
+                // A chat todo's reply IS a user-facing answer — emit it so it persists as a message.
+                Channel.CHAT -> { emit(AgentEvent.AssistantSay(runner.chat(todo.text))); true }
+                Channel.COMPOSIO -> { emit(AgentEvent.AssistantSay(runner.composio(todo.text))); true }
                 Channel.PILOT -> runner.pilot(if (answer != null) "${todo.text} [user said: $answer]" else todo.text)
             }
 

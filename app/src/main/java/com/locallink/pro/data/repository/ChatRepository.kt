@@ -171,10 +171,15 @@ class ChatRepository @Inject constructor(
                 return sb.toString()
             }
             override suspend fun composio(todo: String): String {
+                // Persist the tool_call/tool_result rows so the user sees the work; the final text
+                // is returned and surfaced by the executor as an AssistantSay.
                 var out = ""
                 openRouter.run(emptyList(), todo) { _, _ -> true }.collect { e ->
-                    if (e is AgentEvent.Final) out = e.text
-                    persistPilotEvent(sessionId, e)
+                    when (e) {
+                        is AgentEvent.Final -> out = e.text
+                        is AgentEvent.ToolCall, is AgentEvent.ToolResult -> persistPilotEvent(sessionId, e)
+                        else -> {}
+                    }
                 }
                 return out
             }
@@ -186,8 +191,11 @@ class ChatRepository @Inject constructor(
                     screenshot = { com.locallink.pro.service.pilot.PilotProjectionHolder.capture() },
                 )
                 controller.run(todo).collect { e ->
-                    if (e is AgentEvent.Final && e.text.startsWith("Stopped")) stuck = true
-                    persistPilotEvent(sessionId, e)
+                    when (e) {
+                        is AgentEvent.Final -> if (e.text.startsWith("Stopped")) stuck = true
+                        is AgentEvent.ToolCall, is AgentEvent.ToolResult -> persistPilotEvent(sessionId, e)
+                        else -> {}
+                    }
                 }
                 return !stuck
             }
@@ -240,6 +248,10 @@ class ChatRepository @Inject constructor(
             is AgentEvent.InputRequested -> messageDao.insert(MessageEntity(
                 sessionId = sessionId, role = "system",
                 text = "⌨ Input requested: ${event.question}", timestamp = System.currentTimeMillis(),
+            ))
+            is AgentEvent.AssistantSay -> if (event.text.isNotBlank()) messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "assistant",
+                text = event.text, timestamp = System.currentTimeMillis(),
             ))
         }
         touchSession(sessionId)
@@ -341,7 +353,8 @@ class ChatRepository @Inject constructor(
                     _lastAssistantReply.value = event.text
                 }
                 // Planning-agent-only events; the plain chat/composio engine never emits these.
-                is AgentEvent.Plan, is AgentEvent.TodoStatus, is AgentEvent.InputRequested -> {}
+                is AgentEvent.Plan, is AgentEvent.TodoStatus,
+                is AgentEvent.InputRequested, is AgentEvent.AssistantSay -> {}
             }
         }
     }
