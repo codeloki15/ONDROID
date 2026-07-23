@@ -62,17 +62,22 @@ EOF
 log "setup complete — training starts next"
 
 # ── Stage 4: generate synthetic positives + adversarial negatives ───────
+# The repo is a package now (no top-level generate_samples.py): run it as a module
+# with PYTHONPATH at the repo root (piper_sample_generator + piper_train live there).
+# Its top-level imports need piper-tts even for the .pt generator path.
+python -c "import piper" 2>/dev/null || { log "installing piper-tts"; pip -q install piper-tts; }
+export PYTHONPATH="$ROOT/piper-sample-generator"
 mkdir -p generated/positive generated/negative
 if [ ! -f generated/positive/.done ]; then
   log "generating 3000 'hey omni' samples"
-  python piper-sample-generator/generate_samples.py "hey omni" \
+  python -m piper_sample_generator "hey omni" \
     --model piper-sample-generator/models/en_US-libritts_r-medium.pt \
     --max-samples 3000 --batch-size 50 --output-dir generated/positive
   touch generated/positive/.done
 fi
 if [ ! -f generated/negative/.done ]; then
   log "generating adversarial negatives"
-  python piper-sample-generator/generate_samples.py \
+  python -m piper_sample_generator \
     "hey ah me, a mony, heyomi, hail money, hey armani, how many" \
     --model piper-sample-generator/models/en_US-libritts_r-medium.pt \
     --max-samples 1500 --batch-size 50 --output-dir generated/negative
