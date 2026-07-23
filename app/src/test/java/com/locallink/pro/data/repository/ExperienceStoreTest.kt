@@ -20,9 +20,17 @@ class ExperienceStoreTest {
             return id
         }
         override suspend fun findByNorm(norm: String) = rows.values.firstOrNull { it.taskNorm == norm }
+        override suspend fun byId(id: Long) = rows[id]
         override suspend fun all() = rows.values.toList()
+        override fun observeAll() = kotlinx.coroutines.flow.flowOf(rows.values.toList())
         override suspend fun bumpSuccess(id: Long, now: Long) {
             rows[id]?.let { rows[id] = it.copy(successCount = it.successCount + 1, updatedAt = now) }
+        }
+        override suspend fun rename(id: Long, label: String) {
+            rows[id]?.let { rows[id] = it.copy(label = label) }
+        }
+        override suspend fun setSchedule(id: Long, hour: Int, minute: Int) {
+            rows[id]?.let { rows[id] = it.copy(scheduleHour = hour, scheduleMinute = minute) }
         }
         override suspend fun delete(id: Long) { rows.remove(id) }
         override suspend fun deleteAll() = rows.clear()
