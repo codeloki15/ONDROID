@@ -6,7 +6,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -227,7 +230,13 @@ fun ChatScreen(
         ) {
             VoiceMode(
                 listening = state.isListening,
+                thinking = state.isAiResponding,
+                speaking = state.isSpeaking,
                 partial = state.partialVoiceResult,
+                lastUserText = state.messages.lastOrNull { it.sender == MessageSender.USER }?.text ?: "",
+                aiText = state.streamingText.ifBlank {
+                    state.messages.lastOrNull { it.sender == MessageSender.AI }?.text ?: ""
+                },
                 onRestart = {
                     if (state.isListening) vm.toggleVoiceInput()
                     vm.toggleVoiceInput()
@@ -858,15 +867,74 @@ private fun InputBar(
 
 // ─── Voice mode ──────────────────────────────────────────────────────────
 
+/** What the voice loop is doing right now — drives the sphere's palette + copy. */
+private enum class VoicePhase { Listening, Thinking, Speaking, Paused }
+
 @Composable
 private fun VoiceMode(
     listening: Boolean,
+    thinking: Boolean,
+    speaking: Boolean,
     partial: String,
+    lastUserText: String,
+    aiText: String,
     onRestart: () -> Unit,
     onMic: () -> Unit,
     onClose: () -> Unit,
 ) {
     BackHandler(onBack = onClose)
+    val phase = when {
+        listening -> VoicePhase.Listening
+        thinking -> VoicePhase.Thinking
+        speaking -> VoicePhase.Speaking
+        else -> VoicePhase.Paused
+    }
+    // Palette + energy morph smoothly between phases so the blob visibly "changes mood".
+    val colorFar by animateColorAsState(
+        when (phase) {
+            VoicePhase.Listening -> AuroraViolet
+            VoicePhase.Thinking -> androidx.compose.ui.graphics.Color(0xFF5F4BD8) // cool indigo
+            VoicePhase.Speaking -> AuroraPink
+            VoicePhase.Paused -> androidx.compose.ui.graphics.Color(0xFFB9A9C9)
+        },
+        tween(650), label = "far",
+    )
+    val colorNear by animateColorAsState(
+        when (phase) {
+            VoicePhase.Listening -> AuroraPink
+            VoicePhase.Thinking -> AuroraViolet
+            VoicePhase.Speaking -> androidx.compose.ui.graphics.Color(0xFFF4A97C) // warm peach
+            VoicePhase.Paused -> androidx.compose.ui.graphics.Color(0xFFD9CCE5)
+        },
+        tween(650), label = "near",
+    )
+    val energy by animateFloatAsState(
+        when (phase) {
+            VoicePhase.Listening -> 0.55f
+            VoicePhase.Thinking -> 1f
+            VoicePhase.Speaking -> 0.8f
+            VoicePhase.Paused -> 0.12f
+        },
+        tween(650), label = "energy",
+    )
+    val statusText = when (phase) {
+        VoicePhase.Listening -> "listening…"
+        VoicePhase.Thinking -> "thinking…"
+        VoicePhase.Speaking -> "speaking…"
+        VoicePhase.Paused -> "paused"
+    }
+
+    // Typewriter reveal for the AI reply — reads as streaming while it is spoken.
+    var reveal by remember { mutableStateOf(0) }
+    LaunchedEffect(aiText) {
+        if (aiText.isBlank()) { reveal = 0; return@LaunchedEffect }
+        reveal = 0
+        while (reveal < aiText.length) {
+            kotlinx.coroutines.delay(18)
+            reveal = (reveal + 3).coerceAtMost(aiText.length)
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(OmniBg)) {
         Column(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding(),
@@ -880,28 +948,74 @@ private fun VoiceMode(
                 Spacer(Modifier.width(11.dp))
                 Column {
                     Text("Omni", style = MaterialTheme.typography.titleLarge, color = OmniText)
-                    Text(
-                        if (listening) "listening…" else "paused",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (listening) AuroraPink else OmniTextFaint,
-                    )
+                    androidx.compose.animation.Crossfade(statusText, label = "status") { s ->
+                        Text(
+                            s,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when (phase) {
+                                VoicePhase.Listening -> AuroraPink
+                                VoicePhase.Thinking -> AuroraVioletHi
+                                VoicePhase.Speaking -> androidx.compose.ui.graphics.Color(0xFFE08A4E)
+                                VoicePhase.Paused -> OmniTextFaint
+                            },
+                        )
+                    }
                 }
             }
 
             ParticleSphere(
                 listening = listening,
+                colorFar = colorFar,
+                colorNear = colorNear,
+                energy = energy,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
 
-            Text(
-                text = partial.ifBlank { if (listening) "Say something…" else "Tap the mic to talk" },
-                style = MaterialTheme.typography.headlineSmall,
-                color = if (partial.isBlank()) OmniTextFaint else OmniText,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .padding(horizontal = 34.dp)
-                    .heightIn(min = 84.dp),
-            )
+            // ── Streamed conversation strip ──────────────────────────────
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 26.dp)
+                    .heightIn(min = 96.dp, max = 240.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                val userLine = partial.ifBlank { lastUserText }
+                if (userLine.isNotBlank()) {
+                    Box(
+                        Modifier
+                            .align(Alignment.End)
+                            .clip(RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp))
+                            .background(BubbleBrush)
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                    ) {
+                        Text(
+                            userLine,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = OmniTextOnBubble,
+                            maxLines = 3, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+                if (aiText.isNotBlank() && phase != VoicePhase.Listening) {
+                    Text(
+                        aiText.take(reveal),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = OmniText,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                } else if (userLine.isBlank()) {
+                    Text(
+                        if (listening) "Say something…" else "Tap the mic to talk",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = OmniTextFaint,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
 
             Row(
                 Modifier.padding(top = 10.dp, bottom = 34.dp),

@@ -24,15 +24,19 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * The voice-mode visual: a slowly tumbling cloud of dots on a deformed sphere,
- * violet fading to pink with depth — the reference design's particle blob.
- * While [listening], the sphere breathes; idle, it drifts.
+ * The voice-mode visual: a slowly tumbling cloud of dots on a deformed sphere.
+ * [colorFar]→[colorNear] paints depth; [energy] (0..1) drives ripple amplitude and
+ * dot brightness so the blob visibly changes character between listening/thinking/
+ * speaking; while [listening] the sphere breathes.
  */
 @Composable
 fun ParticleSphere(
     listening: Boolean,
     modifier: Modifier = Modifier,
     particleCount: Int = 850,
+    colorFar: Color = AuroraViolet,
+    colorNear: Color = AuroraPink,
+    energy: Float = 0.5f,
 ) {
     // Unit sphere points via the Fibonacci lattice (stable across recompositions).
     val points = remember(particleCount) {
@@ -67,20 +71,21 @@ fun ParticleSphere(
         val baseR = size.minDimension * 0.36f * (if (listening) breath else 1f)
         val tilt = 0.42f // fixed X-axis tilt so the pole never faces the camera
 
-        // Soft ambient glow behind the cloud.
+        // Soft ambient glow behind the cloud — brighter with energy.
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(AuroraViolet.copy(alpha = if (listening) 0.30f else 0.20f), Color.Transparent),
+                colors = listOf(colorFar.copy(alpha = 0.16f + 0.20f * energy), Color.Transparent),
                 center = c, radius = baseR * 1.9f,
             ),
             radius = baseR * 1.9f, center = c,
         )
 
+        val amp = 0.05f + 0.09f * energy      // surface ripple grows with energy
         val cosS = cos(spin); val sinS = sin(spin)
         val cosT = cos(tilt); val sinT = sin(tilt)
         points.forEachIndexed { i, (px, py, pz) ->
             // Organic surface ripple — each dot swells in and out slightly out of phase.
-            val ripple = 1f + 0.08f * sin(wobble * 2f + i * 0.37f)
+            val ripple = 1f + amp * sin(wobble * (2f + 2f * energy) + i * 0.37f)
             // Rotate around Y (spin), then tilt around X.
             val x1 = px * cosS + pz * sinS
             val z1 = -px * sinS + pz * cosS
@@ -91,8 +96,9 @@ fun ParticleSphere(
             val sr = baseR * ripple
             val pos = Offset(c.x + x1 * sr, c.y + y2 * sr)
             drawCircle(
-                color = lerp(AuroraViolet, AuroraPink, depth).copy(alpha = 0.16f + 0.74f * depth * depth),
-                radius = (0.5f + 1.4f * depth).dp.toPx(),
+                color = lerp(colorFar, colorNear, depth)
+                    .copy(alpha = (0.14f + 0.06f * energy) + (0.66f + 0.14f * energy) * depth * depth),
+                radius = (0.5f + (1.3f + 0.5f * energy) * depth).dp.toPx(),
                 center = pos,
             )
         }
