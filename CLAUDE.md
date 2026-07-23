@@ -27,12 +27,18 @@ app/src/main/java/com/locallink/pro/
 ├── service/pilot/                         # Automate: PlanExecutor, PilotController, MemoryPilot,
 │   │                                      #   ExperienceReplayer (learned routines), OmniAccessibilityService
 │   └── PilotActionSchema.kt               # the pilot's action-space prompt
+├── service/routine/                       # routine scheduling: RoutineScheduler (WorkManager,
+│                                          #   self-chaining daily) + RoutineWorker → runAgent
+├── service/notify/OmniNotificationListener.kt  # notification triggers (rules in Room) → speak/agent
+├── service/call/                          # dial fast-path support + in-call speakerphone assistant (beta)
 ├── service/voice/
 │   ├── VoiceLoopController.kt             # hands-free "Hey Omni" state machine (mic is single-owner!)
 │   ├── WakeWordEngine.kt                  # sherpa-onnx KeywordSpotter (assets/kws)
 │   ├── ParakeetSttEngine.kt + SttModelManager.kt   # on-device STT (~670MB, downloaded in-app)
 │   └── KokoroTtsService.kt                # streaming TTS (assets/kokoro-en-v0_19)
-└── ui/screens/                            # Compose: sessions (home), chat, connect (Composio), settings
+└── ui/screens/                            # Compose: sessions (home + setup-health banner), chat,
+                                           #   onboarding (first-run wizard), routines (library+schedule),
+                                           #   memory (user facts), notifyrules, connect, settings
 ```
 
 ## Hard-won constraints — do not regress
@@ -50,6 +56,21 @@ app/src/main/java/com/locallink/pro/
    runs fight over the one screen and both spiral into replans.
 5. Composio powers **chat and voice only**; Automate's planner emits only chat/pilot
    channels by design.
+
+## Cross-cutting systems
+
+- **Memory facts** (`data/repository/MemoryStore.kt`, Room `memory_facts`): persistent
+  user facts injected into chat/voice system prompts, plainChat, vision and the Automate
+  planner; auto-extracted from user messages (regex-gated background LLM pass).
+- **Routine library** (Settings → Learned routines): rename/run/delete learned routines,
+  optional daily schedule via WorkManager self-chaining one-time work.
+- **Onboarding** (`ui/screens/onboarding/`): 4-step first-run wizard (gate: DataStore
+  `onboarding_done`); home shows a SetupHealthBanner when the OpenRouter key is missing
+  or the a11y service is off (ColorOS kills it on every reinstall).
+- **Vision**: `OpenRouterClient.visionChat` — data-URI JPEG content; falls back through
+  known multimodal models when the selected model rejects images.
+- **Dial fast-path** in `runAgent`: "call <number|remembered contact>" opens the dialer
+  prefilled (ACTION_DIAL only — never places calls unattended).
 
 ## Model assets (Git LFS)
 
