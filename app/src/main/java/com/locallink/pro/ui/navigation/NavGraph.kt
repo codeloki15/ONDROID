@@ -6,14 +6,19 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.locallink.pro.ui.screens.chat.ChatScreen
 import com.locallink.pro.ui.screens.connect.ConnectScreen
 import com.locallink.pro.ui.screens.model.ModelGateScreen
 import com.locallink.pro.ui.screens.onboarding.OnboardingScreen
 import com.locallink.pro.ui.screens.onboarding.OnboardingViewModel
+import com.locallink.pro.ui.screens.routines.RoutinesScreen
 import com.locallink.pro.ui.screens.sessions.SessionsScreen
 import com.locallink.pro.ui.screens.settings.SettingsScreen
 
@@ -24,6 +29,7 @@ object Routes {
     const val CHAT = "chat"            // chat?sessionId={id}&voice={bool}
     const val SETTINGS = "settings"
     const val CONNECT = "connect"
+    const val ROUTINES = "routines"
 }
 
 @Composable
@@ -31,14 +37,21 @@ fun LocalLinkNavGraph(navController: NavHostController) {
     NavHost(navController = navController, startDestination = Routes.GATE) {
         composable(Routes.GATE) {
             // First run goes through the setup wizard; afterwards straight to home.
+            // Navigate only once BOTH the model check and the async onboarding-flag
+            // read have landed — onReady alone raced the DataStore read (null →
+            // wizard shown on every cold start).
             val obVm: OnboardingViewModel = hiltViewModel()
             val onboarded by obVm.done.collectAsState()
-            ModelGateScreen(onReady = {
-                val target = if (onboarded == true) Routes.SESSIONS else Routes.ONBOARDING
-                navController.navigate(target) {
-                    popUpTo(Routes.GATE) { inclusive = true }
+            var modelReady by remember { mutableStateOf(false) }
+            LaunchedEffect(modelReady, onboarded) {
+                val done = onboarded
+                if (modelReady && done != null) {
+                    navController.navigate(if (done) Routes.SESSIONS else Routes.ONBOARDING) {
+                        popUpTo(Routes.GATE) { inclusive = true }
+                    }
                 }
-            })
+            }
+            ModelGateScreen(onReady = { modelReady = true })
         }
         composable(Routes.ONBOARDING) {
             OnboardingScreen(onDone = {
@@ -88,10 +101,14 @@ fun LocalLinkNavGraph(navController: NavHostController) {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onManageApps = { navController.navigate(Routes.CONNECT) },
+                onOpenRoutines = { navController.navigate(Routes.ROUTINES) },
             )
         }
         composable(Routes.CONNECT) {
             ConnectScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.ROUTINES) {
+            RoutinesScreen(onBack = { navController.popBackStack() })
         }
     }
 }

@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.collectLatest
 fun SettingsScreen(
     onBack: () -> Unit,
     onManageApps: () -> Unit = {},
+    onOpenRoutines: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -262,21 +263,26 @@ fun SettingsScreen(
                 // ── Memory ───────────────────────────────────────────────
                 SettingsSection(title = "Memory") {
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClick = onOpenRoutines)
+                            .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text("Learned routines", style = MaterialTheme.typography.titleSmall, color = OmniText)
                             Text(
                                 if (uiState.experienceCount == 0) "Nothing learned yet — successful phone tasks are remembered and replayed exactly"
-                                else "${uiState.experienceCount} task${if (uiState.experienceCount == 1) "" else "s"} Omni can now repeat without thinking",
+                                else "${uiState.experienceCount} task${if (uiState.experienceCount == 1) "" else "s"} Omni can repeat — tap to manage & schedule",
                                 style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
                             )
                         }
-                        if (uiState.experienceCount > 0) {
-                            Spacer(Modifier.width(10.dp))
-                            GhostPill("Forget all", onClick = viewModel::clearExperiences, height = 38.dp)
-                        }
+                        Spacer(Modifier.width(10.dp))
+                        Icon(
+                            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null,
+                            tint = OmniTextFaint, modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
 

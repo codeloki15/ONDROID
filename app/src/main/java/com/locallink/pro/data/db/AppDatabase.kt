@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class, ExperienceEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -42,6 +42,15 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `experiences` ADD COLUMN `slotResidual` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** v3 → v4: routine library — display label + optional daily schedule. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `experiences` ADD COLUMN `label` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `experiences` ADD COLUMN `scheduleHour` INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE `experiences` ADD COLUMN `scheduleMinute` INTEGER NOT NULL DEFAULT -1")
             }
         }
     }

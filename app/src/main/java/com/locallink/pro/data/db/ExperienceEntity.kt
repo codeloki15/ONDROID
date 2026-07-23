@@ -7,6 +7,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 /**
  * A learned routine: the successful action trace of a past pilot run, keyed by the
@@ -24,6 +25,11 @@ data class ExperienceEntity(
     val updatedAt: Long,
     /** Space-joined residual tokens of a parameterized template; "" = exact routine. */
     val slotResidual: String = "",
+    /** User-given display name; "" falls back to [taskRaw]. Never used for matching. */
+    val label: String = "",
+    /** Daily schedule (device local time); -1/-1 = not scheduled. */
+    val scheduleHour: Int = -1,
+    val scheduleMinute: Int = -1,
 )
 
 @Dao
@@ -34,11 +40,24 @@ interface ExperienceDao {
     @Query("SELECT * FROM experiences WHERE taskNorm = :norm LIMIT 1")
     suspend fun findByNorm(norm: String): ExperienceEntity?
 
+    @Query("SELECT * FROM experiences WHERE id = :id LIMIT 1")
+    suspend fun byId(id: Long): ExperienceEntity?
+
     @Query("SELECT * FROM experiences ORDER BY updatedAt DESC")
     suspend fun all(): List<ExperienceEntity>
 
+    /** Live list for the routine library screen. */
+    @Query("SELECT * FROM experiences ORDER BY updatedAt DESC")
+    fun observeAll(): Flow<List<ExperienceEntity>>
+
     @Query("UPDATE experiences SET successCount = successCount + 1, updatedAt = :now WHERE id = :id")
     suspend fun bumpSuccess(id: Long, now: Long)
+
+    @Query("UPDATE experiences SET label = :label WHERE id = :id")
+    suspend fun rename(id: Long, label: String)
+
+    @Query("UPDATE experiences SET scheduleHour = :hour, scheduleMinute = :minute WHERE id = :id")
+    suspend fun setSchedule(id: Long, hour: Int, minute: Int)
 
     @Query("DELETE FROM experiences WHERE id = :id")
     suspend fun delete(id: Long)
