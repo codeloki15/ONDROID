@@ -78,6 +78,9 @@ class KokoroTtsService @Inject constructor(
         Log.d(TAG, "TTS created with ${tts?.numSpeakers()} speakers, sample rate: ${tts?.sampleRate()}")
     }
 
+    // Set by stopSpeaking(); the synthesis callback checks it and aborts generation.
+    @Volatile private var stopRequested = false
+
     fun speak(text: String) {
         if (tts == null) {
             Log.w(TAG, "TTS not initialized")
@@ -86,22 +89,21 @@ class KokoroTtsService @Inject constructor(
 
         // Stop any current playback
         stopSpeaking()
+        stopRequested = false
 
         playbackJob = scope.launch {
             try {
                 _isSpeaking.value = true
-                val audio = tts!!.generate(text = text, sid = speakerId, speed = speed)
-
-                val sampleRate = audio.sampleRate
-                val samples = audio.samples
+                val engine = tts!!
+                val sampleRate = engine.sampleRate()
 
                 val bufferSize = AudioTrack.getMinBufferSize(
                     sampleRate,
                     AudioFormat.CHANNEL_OUT_MONO,
                     AudioFormat.ENCODING_PCM_FLOAT
-                )
+                ).coerceAtLeast(sampleRate) // ≥1s of headroom between synth chunks
 
-                audioTrack = AudioTrack.Builder()
+                val track = AudioTrack.Builder()
                     .setAudioAttributes(
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -118,25 +120,45 @@ class KokoroTtsService @Inject constructor(
                     .setBufferSizeInBytes(bufferSize)
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
+                audioTrack = track
+                track.play()
 
-                audioTrack?.play()
-                audioTrack?.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
-                audioTrack?.stop()
-                audioTrack?.release()
-                audioTrack = null
+                val t0 = System.currentTimeMillis()
+                var first = true
+                // STREAMING synthesis: the engine emits audio per segment as it generates;
+                // each chunk is written to the live AudioTrack immediately, so speech starts
+                // after the FIRST segment instead of after the whole reply is synthesized.
+                // WRITE_BLOCKING doubles as backpressure. Return 1 = keep generating, 0 = abort.
+                val job = coroutineContext[kotlinx.coroutines.Job]
+                engine.generateWithCallback(text, speakerId, speed) { samples ->
+                    if (stopRequested || job?.isActive == false) 0
+                    else {
+                        if (first) { first = false; Log.i(TAG, "first audio in ${System.currentTimeMillis() - t0}ms") }
+                        track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+                        1
+                    }
+                }
+                if (!stopRequested) {
+                    // Let the buffered tail drain before tearing the track down.
+                    runCatching { track.stop() }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error during TTS playback", e)
             } finally {
+                runCatching { audioTrack?.release() }
+                audioTrack = null
                 _isSpeaking.value = false
             }
         }
     }
 
     fun stopSpeaking() {
+        stopRequested = true
         playbackJob?.cancel()
         playbackJob = null
         try {
-            audioTrack?.stop()
+            audioTrack?.pause()
+            audioTrack?.flush()
             audioTrack?.release()
         } catch (_: Exception) {}
         audioTrack = null
