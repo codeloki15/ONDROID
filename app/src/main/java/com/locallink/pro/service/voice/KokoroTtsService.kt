@@ -129,15 +129,21 @@ class KokoroTtsService @Inject constructor(
                 // each chunk is written to the live AudioTrack immediately, so speech starts
                 // after the FIRST segment instead of after the whole reply is synthesized.
                 // WRITE_BLOCKING doubles as backpressure. Return 1 = keep generating, 0 = abort.
+                //
+                // MUST be an explicit Function1 object, NOT a lambda: sherpa's JNI resolves the
+                // callback by exact signature invoke([F)Ljava/lang/Integer;. Kotlin 2.x lambdas
+                // compile via invokedynamic → D8 synthesizes a class with only the erased
+                // invoke(Object)Object, and the native lookup SIGABRTs (NoSuchMethodError).
                 val job = coroutineContext[kotlinx.coroutines.Job]
-                engine.generateWithCallback(text, speakerId, speed) { samples ->
-                    if (stopRequested || job?.isActive == false) 0
-                    else {
+                val onSamples = object : Function1<FloatArray, Int> {
+                    override fun invoke(samples: FloatArray): Int {
+                        if (stopRequested || job?.isActive == false) return 0
                         if (first) { first = false; Log.i(TAG, "first audio in ${System.currentTimeMillis() - t0}ms") }
                         track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
-                        1
+                        return 1
                     }
                 }
+                engine.generateWithCallback(text, speakerId, speed, onSamples)
                 if (!stopRequested) {
                     // Let the buffered tail drain before tearing the track down.
                     runCatching { track.stop() }
