@@ -26,6 +26,9 @@ Mark "needs_input": true with a short "input_reason" (phrased as the question to
 confirmation of a consequential/irreversible action, or info not on the device.
 NEVER create a todo whose only job is to ask the user something — instead set needs_input on the
 todo that USES the answer; the user is asked automatically right before that todo runs.
+Multi-item tasks ("delete all X", "reply to every Y"): todo 1 = locate/list the items and report
+them; todo 2 = process the found items one by one. Each completed todo's report is passed back to
+you, so later todos and replans can name the exact items found.
 Respond with ONLY JSON: {"todos":[{"text":"..","channel":"chat|pilot","needs_input":false,"input_reason":""}]}
 Keep it minimal — as few todos as truly needed.
 """

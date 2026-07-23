@@ -247,6 +247,7 @@ class VoiceService @Inject constructor(
         _partialResult.value = ""
         val started = parakeet.start(
             onSpeechStart = { _partialResult.value = "…" },
+            onPartial = { text -> _partialResult.value = text },
             onFinal = { text ->
                 Log.d(TAG, "parakeet final: $text")
                 _partialResult.value = ""

@@ -43,12 +43,21 @@ class ChatRepository @Inject constructor(
     private val agentMutex = Mutex()
     @Volatile private var activeTask: String? = null
 
-    /** Wrap an agent flow so executions are strictly serialized on the shared screen. */
+    /**
+     * Wrap an agent flow so executions are strictly serialized on the shared screen. The STOP
+     * pill (and its cancel-flag reset) belongs to the run that is EXECUTING — showing it at
+     * submit time would clear a STOP aimed at the active run.
+     */
     private fun serialized(task: String, inner: Flow<AgentEvent>): Flow<AgentEvent> = flow {
         agentMutex.withLock {
             activeTask = task
             _isAiResponding.value = true
-            try { emitAll(inner) } finally { activeTask = null }
+            val svc = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
+            svc?.showStop()
+            try { emitAll(inner) } finally {
+                svc?.hideStop()
+                activeTask = null
+            }
         }
     }
 
@@ -250,19 +259,21 @@ class ChatRepository @Inject constructor(
 
             // Composio channel disabled — never routed here (planner emits only chat/pilot).
             override suspend fun composio(todo: String): String = openRouter.plainChat(todo)
-            override suspend fun pilot(todo: String): Boolean {
+            override suspend fun pilot(todo: String): String? {
+                var report: String? = null
                 var stuck = false
                 memoryPilot(
                     service.asActuator(),
                     askUser = { q -> requestInput(q, null) },
                 ).run(todo).collect { e ->
                     when (e) {
-                        is AgentEvent.Final -> if (e.text.startsWith("Stopped")) stuck = true
+                        is AgentEvent.Final ->
+                            if (e.text.startsWith("Stopped")) stuck = true else report = e.text
                         is AgentEvent.ToolCall, is AgentEvent.ToolResult -> persistPilotEvent(sessionId, e)
                         else -> {}
                     }
                 }
-                return !stuck
+                return if (stuck) null else (report ?: "Done.")
             }
             override suspend fun requestInput(question: String, reason: String?): String? {
                 val answer = service.requestInput(question, reason)

@@ -27,6 +27,18 @@ object PilotActionSchema {
         re-read the NEW element list to see the result. Never repeat the same tap that had no
         effect. When the goal is visibly achieved, call done(result). If you are stuck or the
         screen is unexpected, call ask(question) instead of guessing.
+
+        Self-preservation: NEVER open Accessibility settings, never tap anything named
+        "OmniPro", and never uninstall/force-stop/disable OmniPro — that is you; touching it
+        kills the running task. If you find yourself on an Accessibility or OmniPro screen,
+        press back or home immediately and continue via a different route.
+
+        Long tasks: work item by item — finish one item completely before the next. In
+        done(result), REPORT what you found and did, listing concrete names/values (e.g.
+        "Found games: Chess, Sudoku, Candy Crush. Uninstalled Chess and Sudoku."). If you
+        cannot finish everything, done(result) with exact progress and what remains — the
+        planner continues from your report. Ask(question) when only the user can decide
+        (which items, confirmations of irreversible actions).
     """.trimIndent()
 
     private fun fn(name: String, description: String, params: JSONObject): JSONObject =

@@ -37,6 +37,9 @@ class ParakeetSttEngine @Inject constructor(
         private const val VAD_WINDOW = 512              // silero v5 frame
         private const val NO_SPEECH_TIMEOUT_MS = 8000L  // give up if the user never speaks
         private const val MAX_UTTERANCE_S = 20f
+        private const val PARTIAL_EVERY_MS = 1000L      // live-transcript cadence while speaking
+        private const val PARTIAL_MAX_S = 15            // stop partial decodes on very long speech
+        private const val PREROLL_SAMPLES = SAMPLE_RATE / 2 // keep 0.5 s before detected onset
         const val MODEL_DIR = "parakeet-tdt-v3"
 
         val MODEL_FILES = listOf("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
@@ -121,8 +124,9 @@ class ParakeetSttEngine @Inject constructor(
 
     /**
      * Single-shot capture: opens the mic, waits for one utterance (VAD-endpointed), decodes
-     * it and calls [onFinal]. [onError] fires on silence timeout / mic failure. Exactly one
-     * of the two callbacks fires per start.
+     * it and calls [onFinal]. While the user is speaking, the buffered speech is re-decoded
+     * about once a second on a side thread and streamed out via [onPartial] — live captions.
+     * [onError] fires on silence timeout / mic failure. Exactly one of onFinal/onError fires.
      */
     @SuppressLint("MissingPermission") // caller ensures RECORD_AUDIO granted
     @Synchronized
@@ -130,6 +134,7 @@ class ParakeetSttEngine @Inject constructor(
         onSpeechStart: () -> Unit,
         onFinal: (String) -> Unit,
         onError: (String) -> Unit,
+        onPartial: (String) -> Unit = {},
     ): Boolean {
         if (running) return false
         val rec = recognizer ?: run { onError("On-device model not loaded"); return false }
@@ -155,6 +160,11 @@ class ParakeetSttEngine @Inject constructor(
             val buf = ShortArray(VAD_WINDOW)
             val window = FloatArray(VAD_WINDOW)
             val utterance = ArrayList<Float>(SAMPLE_RATE * 10)
+            // Raw audio since capture start — the live-partial decoder reads slices of this.
+            val raw = ArrayList<Float>(SAMPLE_RATE * 22)
+            var speechStartIdx = -1
+            var lastPartialAt = 0L
+            val partialBusy = java.util.concurrent.atomic.AtomicBoolean(false)
             var sawSpeech = false
             var announcedSpeech = false
             val startedAt = System.currentTimeMillis()
@@ -170,10 +180,32 @@ class ParakeetSttEngine @Inject constructor(
                     if (!running) break
                     for (i in 0 until VAD_WINDOW) window[i] = buf[i] / 32768f
                     v.acceptWaveform(window.copyOf())
+                    for (i in 0 until VAD_WINDOW) raw.add(window[i])
 
                     if (v.isSpeechDetected()) {
                         sawSpeech = true
+                        if (speechStartIdx < 0) speechStartIdx = maxOf(0, raw.size - VAD_WINDOW - PREROLL_SAMPLES)
                         if (!announcedSpeech) { announcedSpeech = true; onSpeechStart() }
+                    }
+
+                    // Live captions: re-decode the speech-so-far off-thread about once a second.
+                    val now = System.currentTimeMillis()
+                    if (sawSpeech && speechStartIdx >= 0 && running &&
+                        now - lastPartialAt >= PARTIAL_EVERY_MS &&
+                        raw.size - speechStartIdx <= SAMPLE_RATE * PARTIAL_MAX_S &&
+                        partialBusy.compareAndSet(false, true)
+                    ) {
+                        lastPartialAt = now
+                        val snapshot = FloatArray(raw.size - speechStartIdx)
+                        for (i in snapshot.indices) snapshot[i] = raw[speechStartIdx + i]
+                        thread(name = "parakeet-partial", isDaemon = true) {
+                            try {
+                                val text = decode(rec, snapshot)
+                                if (running && !cancelled && text.isNotBlank()) onPartial(text)
+                            } finally {
+                                partialBusy.set(false)
+                            }
+                        }
                     }
                     // Completed speech segments become the utterance.
                     while (!v.empty()) {
@@ -210,7 +242,10 @@ class ParakeetSttEngine @Inject constructor(
         return true
     }
 
-    private fun decode(rec: OfflineRecognizer, samples: FloatArray): String {
+    // Serializes partial + final decodes: the final must not race an in-flight partial.
+    private val decodeLock = Any()
+
+    private fun decode(rec: OfflineRecognizer, samples: FloatArray): String = synchronized(decodeLock) {
         val t0 = System.currentTimeMillis()
         val stream = rec.createStream()
         return try {

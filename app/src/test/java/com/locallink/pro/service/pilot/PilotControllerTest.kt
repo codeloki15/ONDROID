@@ -63,11 +63,11 @@ class PilotControllerTest {
 
     @Test fun stopsAtMaxSteps() = runTest {
         // Reasoner always taps; the screen changes BETWEEN steps (so the stuck guard never
-        // fires) but is stable within a step (snapshot + pre-act freshen see the same tree,
-        // so the tap executes). Two perceives per step: snapshot + freshen.
+        // fires) but is stable within a step. Three perceives per step: snapshot + pre-act
+        // freshen + post-act outcome check.
         var calls = 0
         val actuator = FakeActuator(perceiveFn = {
-            val step = calls++ / 2
+            val step = calls++ / 3
             listOf(PilotElement(0, "n$step", null, null, null, intArrayOf(0, 0, 1, 1), true, false))
         })
         val ctrl = PilotController(

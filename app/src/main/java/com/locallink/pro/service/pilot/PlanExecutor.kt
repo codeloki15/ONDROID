@@ -7,15 +7,16 @@ import kotlinx.coroutines.flow.flow
 interface ChannelRunner {
     suspend fun chat(todo: String): String
     suspend fun composio(todo: String): String
-    suspend fun pilot(todo: String): Boolean   // false = stuck/failed
+    /** @return the pilot's done() report on success, null when stuck/failed. */
+    suspend fun pilot(todo: String): String?
     suspend fun requestInput(question: String, reason: String?): String?
 }
 
 class PlanExecutor(
     private val planner: PlanSource,
     private val runner: ChannelRunner,
-    private val maxSteps: Int = 25,
-    private val maxReplans: Int = 3,
+    private val maxSteps: Int = 100,
+    private val maxReplans: Int = 5,
     /** True once the user hit STOP — aborts the whole plan instead of replanning around it. */
     private val cancelled: () -> Boolean = { false },
     /** Short description of what's on screen right now — grounds replans in reality. */
@@ -45,16 +46,23 @@ class PlanExecutor(
             }
 
             val withAnswer = if (answer != null) "${todo.text} [user said: $answer]" else todo.text
+            var report: String? = null
             val ok: Boolean = when (todo.channel) {
                 // A chat todo's reply IS a user-facing answer — emit it so it persists as a message.
                 Channel.CHAT -> { emit(AgentEvent.AssistantSay(runner.chat(withAnswer))); true }
                 Channel.COMPOSIO -> { emit(AgentEvent.AssistantSay(runner.composio(withAnswer))); true }
-                Channel.PILOT -> runner.pilot(withAnswer)
+                Channel.PILOT -> {
+                    // Earlier todos' reports ride along so this leg knows what was found/done.
+                    val progress = done.takeLast(2).joinToString("; ")
+                    val full = if (progress.isBlank()) withAnswer else "$withAnswer\n[Progress so far: $progress]"
+                    report = runner.pilot(full); report != null
+                }
             }
 
             if (ok) {
                 emit(AgentEvent.TodoStatus(i, todo.text, done = true))
-                done.add(todo.text)
+                // Carry the pilot's report forward — replans and later todos build on findings.
+                done.add(if (report.isNullOrBlank() || report == "Done.") todo.text else "${todo.text} → $report")
                 i++
             } else {
                 // The user pressing STOP surfaces as a failed pilot leg — abort, don't replan.

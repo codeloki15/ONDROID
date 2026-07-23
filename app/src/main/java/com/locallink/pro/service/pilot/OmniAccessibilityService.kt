@@ -40,9 +40,10 @@ class OmniAccessibilityService : AccessibilityService() {
         onEvent: suspend (AgentEvent) -> Unit,
         onComplete: suspend (Throwable?) -> Unit = {},
     ) {
-        showStop()
+        // NOTE: the STOP pill is shown/hidden by ChatRepository.serialized() around the run that
+        // is actually EXECUTING — doing it here would reset the cancel flag for queued runs.
         flow.onEach { onEvent(it) }
-            .onCompletion { cause -> hideStop(); onComplete(cause) }
+            .onCompletion { cause -> onComplete(cause) }
             .launchIn(pilotScope)
     }
 
@@ -61,8 +62,27 @@ class OmniAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* perception is pull-based */ }
     override fun onInterrupt() {}
 
-    fun showStop() { cancelFlag.set(false); overlay?.show() }
-    fun hideStop() { overlay?.hide() }
+    @Volatile private var stopActive = false
+
+    fun showStop() { cancelFlag.set(false); stopActive = true; mainHandler.post { overlay?.show() } }
+    fun hideStop() { stopActive = false; mainHandler.post { overlay?.hide() } }
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * Injected gestures land on ANY window — including our own STOP pill. A tap aimed at a
+     * top-right element (Settings' search "Cancel"/"Clear query" live exactly there) would hit
+     * the pill and cancel the run: the agent kept stopping itself. Hide the pill for the few
+     * hundred ms of each gesture, then restore it.
+     */
+    private suspend fun <T> withPillHidden(block: suspend () -> T): T {
+        kotlinx.coroutines.withContext(Dispatchers.Main) { overlay?.hide() }
+        try {
+            return block()
+        } finally {
+            kotlinx.coroutines.withContext(Dispatchers.Main) { if (stopActive) overlay?.show() }
+        }
+    }
 
     private var inputOverlay: InputRequestOverlay? = null
 
@@ -88,13 +108,13 @@ class OmniAccessibilityService : AccessibilityService() {
     /** Expose this service to the Pilot loop as a [PilotActuator]. */
     fun asActuator(): PilotActuator = object : PilotActuator {
         override fun perceive() = snapshot()
-        override suspend fun tap(e: PilotElement) = tapElement(e)
-        override suspend fun longPress(e: PilotElement) = this@OmniAccessibilityService.longPress(e)
-        override suspend fun doubleTap(e: PilotElement) = this@OmniAccessibilityService.doubleTap(e)
-        override suspend fun drag(from: PilotElement, to: PilotElement) = this@OmniAccessibilityService.drag(from, to)
+        override suspend fun tap(e: PilotElement) = withPillHidden { tapElement(e) }
+        override suspend fun longPress(e: PilotElement) = withPillHidden { this@OmniAccessibilityService.longPress(e) }
+        override suspend fun doubleTap(e: PilotElement) = withPillHidden { this@OmniAccessibilityService.doubleTap(e) }
+        override suspend fun drag(from: PilotElement, to: PilotElement) = withPillHidden { this@OmniAccessibilityService.drag(from, to) }
         override suspend fun type(e: PilotElement, text: String) = typeText(e, text)
         override fun clear(e: PilotElement) = clearText(e)
-        override suspend fun swipe(direction: String) = this@OmniAccessibilityService.swipe(direction)
+        override suspend fun swipe(direction: String) = withPillHidden { this@OmniAccessibilityService.swipe(direction) }
         override fun launchApp(app: String) = this@OmniAccessibilityService.launchApp(app)
         override fun back() = goBack()
         override fun home() = goHome()

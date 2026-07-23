@@ -14,7 +14,7 @@ class PlanExecutorTest {
         val calls = ArrayList<String>()
         override suspend fun chat(todo: String): String { calls.add("chat:$todo"); return "chat-reply" }
         override suspend fun composio(todo: String): String { calls.add("composio:$todo"); return "composio-ok" }
-        override suspend fun pilot(todo: String): Boolean { calls.add("pilot:$todo"); return true }
+        override suspend fun pilot(todo: String): String? { calls.add("pilot:$todo"); return "ok" }
         override suspend fun requestInput(question: String, reason: String?): String? {
             calls.add("input:$question"); return onInput(question)
         }
@@ -28,7 +28,10 @@ class PlanExecutorTest {
         )) }
         val runner = FakeRunner()
         val events = PlanExecutor(planner, runner).run("do stuff").toList()
-        assertEquals(listOf("chat:say hi", "composio:email bob", "pilot:open settings"), runner.calls)
+        assertEquals(listOf("chat:say hi", "composio:email bob"), runner.calls.take(2))
+        // Pilot todos carry earlier todos' progress as context.
+        assertTrue(runner.calls[2].startsWith("pilot:open settings"))
+        assertTrue(runner.calls[2].contains("Progress so far"))
         assertTrue(events.first() is AgentEvent.Plan)
         assertTrue(events.last() is AgentEvent.Final)
     }
@@ -51,7 +54,7 @@ class PlanExecutorTest {
         val runner = object : ChannelRunner {
             override suspend fun chat(todo: String): String { calls.add("chat:$todo"); return "ok" }
             override suspend fun composio(todo: String) = "ok"
-            override suspend fun pilot(todo: String): Boolean { calls.add("pilot:$todo"); return true }
+            override suspend fun pilot(todo: String): String? { calls.add("pilot:$todo"); return "ok" }
             override suspend fun requestInput(question: String, reason: String?): String? {
                 calls.add("input:$question|ctx:$reason"); return "Candy Crush"
             }
@@ -72,7 +75,7 @@ class PlanExecutorTest {
         val runner = object : ChannelRunner {
             override suspend fun chat(todo: String) = "ok"
             override suspend fun composio(todo: String) = "ok"
-            override suspend fun pilot(todo: String): Boolean = false // user hit STOP mid-leg
+            override suspend fun pilot(todo: String): String? = null // user hit STOP mid-leg
             override suspend fun requestInput(question: String, reason: String?): String? = null
         }
         val events = PlanExecutor(planner, runner, cancelled = { true }).run("x").toList()
@@ -91,7 +94,7 @@ class PlanExecutorTest {
             val calls = ArrayList<String>()
             override suspend fun chat(todo: String): String { calls.add("chat:$todo"); return "ok" }
             override suspend fun composio(todo: String) = "ok"
-            override suspend fun pilot(todo: String): Boolean { calls.add("pilot:$todo"); return false } // stuck
+            override suspend fun pilot(todo: String): String? { calls.add("pilot:$todo"); return null } // stuck
             override suspend fun requestInput(question: String, reason: String?): String? = null
         }
         val events = PlanExecutor(planner, runner).run("x").toList()

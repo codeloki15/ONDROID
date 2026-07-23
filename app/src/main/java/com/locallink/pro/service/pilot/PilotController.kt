@@ -41,7 +41,7 @@ class PilotController(
     private val actuator: PilotActuator,
     /** Optional per-step screenshot for vision. Returns null → tree-only for that step. */
     private val screenshot: suspend () -> ByteArray? = { null },
-    private val maxSteps: Int = 25,
+    private val maxSteps: Int = 60,
     /** Called with the successful action trace when the run ends in Done — experience learning. */
     private val onTrace: (suspend (List<TraceStep>) -> Unit)? = null,
     /**
@@ -57,13 +57,23 @@ class PilotController(
         var lastActionSig: String? = null
         var stuckCount = 0
         var step = 0
+        // Mechanical repeat-blocker (pi-style guard hook): same action on the same screen
+        // twice is never executed again — the model is told to choose differently.
+        val attempted = HashMap<String, Int>()
         while (step < maxSteps) {
             step++
             if (actuator.cancelled()) { emit(AgentEvent.Final("Stopped.")); return@flow }
             val elements = actuator.perceive()
             val screenSig = elements.joinToString("|") { "${it.text}:${it.bounds.joinToString(",")}" }
             val shot = screenshot()
-            val (name, args) = reasoner.nextAction(task, elements, shot, history)
+            // Long runs: window the history so the prompt stays bounded — the tail carries
+            // the actionable context, the prefix collapses to a count.
+            val recent = if (history.size <= HISTORY_WINDOW) history
+            else buildList {
+                add("(${history.size - HISTORY_WINDOW} earlier actions omitted)")
+                addAll(history.takeLast(HISTORY_WINDOW))
+            }
+            val (name, args) = reasoner.nextAction(task, elements, shot, recent)
             val action = PilotActionParser.parse(name, args)
 
             // Terminal actions first.
@@ -98,11 +108,22 @@ class PilotController(
                 return@flow
             }
 
+            // Repeat-blocker: refuse to re-execute an action already tried twice on this screen.
+            val attemptKey = "$screenSig##$name$args"
+            val tries = attempted.getOrDefault(attemptKey, 0)
+            if (tries >= 2) {
+                history.add(
+                    "BLOCKED $name$args — already tried ${tries}x on this exact screen with no " +
+                        "progress. Do something DIFFERENT (another element, scroll, back, or done/ask).",
+                )
+                continue
+            }
+            attempted[attemptKey] = tries + 1
+
             val id = UUID.randomUUID().toString()
             emit(AgentEvent.ToolCall(id, name, args, true))
             val (ok, note) = execute(action, elements)
             emit(AgentEvent.ToolResult(id, name, if (ok) note else "failed: $note", ok))
-            history.add(note)
             if (ok) {
                 val ts = traceStepOf(action, elements)
                 if (ts != null) trace.add(ts) else traceBroken = true
@@ -114,6 +135,18 @@ class PilotController(
             if (ok && action.changesScreen()) {
                 kotlinx.coroutines.delay(if (action is PilotAction.LaunchApp) LAUNCH_SETTLE_MS else SETTLE_MS)
             }
+            // Outcome-annotated note (pi lesson: results carry verdict + post-state, never a
+            // bare "tapped X"): tell the model where the action LANDED, or that it did nothing.
+            history.add(
+                if (!ok) note
+                else if (!action.changesScreen()) note
+                else {
+                    val after = actuator.perceive()
+                    val afterSig = after.joinToString("|") { "${it.text}:${it.bounds.joinToString(",")}" }
+                    if (afterSig == screenSig) "$note → screen did NOT change (no effect)"
+                    else "$note → now on: ${screenTitle(after)}"
+                },
+            )
         }
         emit(AgentEvent.Final("Stopped after $maxSteps steps."))
     }.flowOn(Dispatchers.IO) // network (reasoner) + a11y calls must run off the main thread
@@ -176,6 +209,11 @@ class PilotController(
 
     private fun PilotElement.label(): String = text ?: desc ?: cls ?: ""
 
+    /** First few visible texts — enough for the model to recognize which screen it landed on. */
+    private fun screenTitle(elements: List<PilotElement>): String =
+        elements.mapNotNull { e -> (e.text ?: e.desc)?.takeIf { it.isNotBlank() } }
+            .distinct().take(4).joinToString(" · ").ifBlank { "(blank screen)" }
+
     /** Convert an executed action into a replayable [TraceStep] (null = not traceable). */
     private fun traceStepOf(action: PilotAction, elements: List<PilotElement>): TraceStep? {
         fun el(id: Int) = elements.firstOrNull { it.id == id }
@@ -221,5 +259,6 @@ class PilotController(
         const val SETTLE_MS = 700L
         const val LAUNCH_SETTLE_MS = 1600L  // app launches need splash/cold-start time
         const val MAX_TRACE_STEPS = 15      // longer flows are too fragile to replay verbatim
+        const val HISTORY_WINDOW = 30       // reasoner sees the last N action notes verbatim
     }
 }
