@@ -1,3 +1,6 @@
-▁HE Y ▁O M N I
-▁HI ▁O M N I
-▁O K ▁O M N I
+▁HE Y ▁O M N I :3.5 #0.06 @HEY_OMNI
+▁HI ▁O M N I :3.5 #0.06 @HI_OMNI
+▁O K ▁O M N I :3.0 #0.08 @OK_OMNI
+▁HE Y ▁OH M N I :3.5 #0.06 @HEY_OMNI
+▁OH M N I :3.5 #0.08 @OMNI
+▁O M N I :4.0 #0.12 @OMNI

@@ -59,8 +59,9 @@ class WakeWordEngine @Inject constructor(
             modelConfig = modelConfig,
             keywordsFile = "$DIR/keywords.txt",
             // More sensitive than defaults so a short phrase like "Hey Omni" triggers.
-            keywordsScore = 3.0f,       // boost keyword tokens
-            keywordsThreshold = 0.10f,  // lower = easier to fire (default ~0.25)
+            // Per-keyword :boost/#threshold in keywords.txt override these globals.
+            keywordsScore = 3.5f,       // boost keyword tokens
+            keywordsThreshold = 0.08f,  // lower = easier to fire (default ~0.25)
         )
         spotter = KeywordSpotter(assetManager = context.assets, config = config)
         Log.d(TAG, "KeywordSpotter ready")
