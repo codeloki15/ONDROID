@@ -85,6 +85,12 @@ class OmniAccessibilityService : AccessibilityService() {
     }
 
     private var inputOverlay: InputRequestOverlay? = null
+    private var transcript: TranscriptOverlay? = null
+
+    /** Live "Hey Omni" transcription floater — visible over any app while capturing. */
+    fun showTranscript() { mainHandler.post { (transcript ?: TranscriptOverlay(this).also { transcript = it }).show() } }
+    fun updateTranscript(text: String) { transcript?.update(text) }
+    fun hideTranscript() { mainHandler.post { transcript?.hide() } }
 
     /** Show the input floater and suspend until the user submits (returns text) or cancels (null). */
     suspend fun requestInput(question: String, reason: String?): String? {

@@ -73,6 +73,14 @@ class VoiceLoopController @Inject constructor(
                 // No speech captured (timeout/no-match): retry listening a couple times, then idle.
                 voice.sttError.collect { if (_state.value == LoopState.CAPTURING) onSilence() }
             }
+            scope.launch {
+                // Stream the live transcript into the system-wide floater while capturing.
+                voice.partialResult.collect { p ->
+                    if (_state.value == LoopState.CAPTURING) {
+                        com.locallink.pro.service.pilot.OmniAccessibilityService.instance?.updateTranscript(p)
+                    }
+                }
+            }
         }
         runCatching { tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80) }
         enterWakeListening()
@@ -99,10 +107,12 @@ class VoiceLoopController @Inject constructor(
     private fun onWakeWord() {
         if (_state.value != LoopState.WAKE_LISTENING) return
         silences = 0
-        // Claim CAPTURING now (closes the window for a second wake event), chime, then free the
-        // wake mic off-main and only start STT once it's actually released.
+        // Claim CAPTURING now (closes the window for a second wake event), chime, show the
+        // live-transcription floater over whatever app is open, then free the wake mic
+        // off-main and only start STT once it's actually released.
         _state.value = LoopState.CAPTURING
         runCatching { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120) }
+        com.locallink.pro.service.pilot.OmniAccessibilityService.instance?.showTranscript()
         micScope.launch {
             wake.stop() // blocks until the wake worker exits + AudioRecord released
             main.post { if (_state.value == LoopState.CAPTURING) voice.startListening() }
@@ -124,41 +134,49 @@ class VoiceLoopController @Inject constructor(
     }
 
     private fun onUtterance(text: String) {
+        val svc = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
         if (text.isBlank()) { onSilence(); return }
         // Stop phrase ends the conversation.
         if (text.trim().lowercase().trimEnd('.', '!', '?') in STOP_PHRASES) {
             silences = 0
+            svc?.hideTranscript()
             enterWakeListening()
             return
         }
         silences = 0
         _state.value = LoopState.THINKING
+        svc?.updateTranscript(text)
         val myTurn = ++turnId
         scope.launch {
             try {
-                chat.send(text, isVoice = true)
+                // Hand the task to the AUTOMATE agent (plans, replays learned routines, drives
+                // the phone) and bring the app to the foreground so the user watches it work.
+                openApp()
+                chat.runAgent(text)
                 if (myTurn != turnId) return@launch
-                speakThenResume(chat.lastAssistantReply.value)
+                svc?.hideTranscript()
+                voice.speak("On it.")
+                // The agent runs in the accessibility service's scope; return to wake-word
+                // listening so "Hey Omni" keeps working (the mic stays free for the next call).
+                kotlinx.coroutines.delay(1500)
+                if (myTurn == turnId) enterWakeListening()
             } catch (e: Exception) {
                 Log.e(TAG, "turn failed", e)
+                svc?.hideTranscript()
                 if (myTurn == turnId) enterWakeListening()
             }
         }
     }
 
-    private fun speakThenResume(reply: String) {
-        if (reply.isBlank()) { beginCapture(chime = false); return }
-        _state.value = LoopState.SPEAKING
-        val myTurn = turnId
-        voice.stopListening() // ensure mic free before TTS
-        voice.speak(reply)
-        scope.launch {
-            // Wait for TTS to start then finish. Guard with a timeout so a TTS that never
-            // signals (failed synth) can't freeze the loop — we re-listen regardless.
-            withTimeoutOrNull(60_000L) { voice.isSpeaking.dropWhile { !it }.first { !it } }
-            // Conversation mode: re-open the mic for the next turn (no wake word needed).
-            // Falls back to wake-word idle after MAX_SILENCES of no speech, or on "stop".
-            if (myTurn == turnId && _state.value == LoopState.SPEAKING) beginCapture(chime = false)
+    /** Bring OmniPro to the foreground (best-effort) so the hands-free task is visible. */
+    private fun openApp() {
+        runCatching {
+            val ctx = com.locallink.pro.service.pilot.OmniAccessibilityService.instance ?: return
+            val intent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            } ?: return
+            ctx.startActivity(intent)
         }
     }
+
 }
