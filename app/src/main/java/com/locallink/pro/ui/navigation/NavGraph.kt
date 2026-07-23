@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.locallink.pro.ui.screens.chat.ChatScreen
 import com.locallink.pro.ui.screens.connect.ConnectScreen
+import com.locallink.pro.ui.screens.memory.MemoryScreen
 import com.locallink.pro.ui.screens.model.ModelGateScreen
 import com.locallink.pro.ui.screens.onboarding.OnboardingScreen
 import com.locallink.pro.ui.screens.onboarding.OnboardingViewModel
@@ -30,6 +31,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val CONNECT = "connect"
     const val ROUTINES = "routines"
+    const val MEMORY = "memory"
 }
 
 @Composable
@@ -102,6 +104,7 @@ fun LocalLinkNavGraph(navController: NavHostController) {
                 onBack = { navController.popBackStack() },
                 onManageApps = { navController.navigate(Routes.CONNECT) },
                 onOpenRoutines = { navController.navigate(Routes.ROUTINES) },
+                onOpenMemory = { navController.navigate(Routes.MEMORY) },
             )
         }
         composable(Routes.CONNECT) {
@@ -109,6 +112,9 @@ fun LocalLinkNavGraph(navController: NavHostController) {
         }
         composable(Routes.ROUTINES) {
             RoutinesScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.MEMORY) {
+            MemoryScreen(onBack = { navController.popBackStack() })
         }
     }
 }

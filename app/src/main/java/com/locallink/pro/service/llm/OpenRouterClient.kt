@@ -44,6 +44,7 @@ class OpenRouterUnavailable(val reason: String, cause: Throwable? = null) : Exce
 class OpenRouterClient @Inject constructor(
     private val mcp: ComposioMcpClient,
     private val settings: SettingsPreferences,
+    private val memory: com.locallink.pro.data.repository.MemoryStore,
 ) {
     companion object {
         private const val TAG = "OpenRouterClient"
@@ -152,8 +153,10 @@ class OpenRouterClient @Inject constructor(
         // fresh id every hop ("able", "bite"), so Tool Router lost state between steps. Pinning it
         // here and telling the model to reuse it keeps search→schema→execute on one session.
         val toolSessionId = "omni-" + UUID.randomUUID().toString().take(8)
+        val userFacts = runCatching { memory.promptBlock() }.getOrDefault("")
         val sys = buildString {
             append(SYSTEM)
+            append(userFacts)
             if (metaTools.length() > 0) {
                 // Composio's OWN guidance — it spells out the exact protocol (SEARCH_TOOLS first,
                 // include a properly-formed `arguments` field matching the schema, never pass
@@ -318,9 +321,10 @@ class OpenRouterClient @Inject constructor(
         val key = settings.loadOpenRouterApiKey()
         if (key.isBlank()) return@withContext ""
         val model = settings.loadOpenRouterModel()
+        val userFacts = runCatching { memory.promptBlock() }.getOrDefault("")
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content",
-                "You are Omni, a concise, helpful assistant. Answer directly."))
+                "You are Omni, a concise, helpful assistant. Answer directly.$userFacts"))
         history.takeLast(12).forEach { (role, text) ->
             if (text.isNotBlank()) messages.put(JSONObject().put("role", role).put("content", text))
         }

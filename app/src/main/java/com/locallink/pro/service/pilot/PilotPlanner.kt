@@ -35,6 +35,8 @@ Keep it minimal — as few todos as truly needed.
 
 class OpenRouterPlanner(
     private val settings: SettingsPreferences,
+    /** Optional "Known facts about the user" block appended to the planning request. */
+    private val userFacts: suspend () -> String = { "" },
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build(),
 ) : PlanSource {
@@ -45,8 +47,9 @@ class OpenRouterPlanner(
         val model = settings.loadOpenRouterModel()
         val fallback = Plan(listOf(Todo(task, Channel.CHAT, false, null)))
         if (key.isBlank()) return fallback
-        val user = if (context.isBlank()) "Request: $task"
-                   else "Request: $task\n\nProgress so far / current state:\n$context\n\nReplan the REMAINING todos."
+        val facts = runCatching { userFacts() }.getOrDefault("")
+        val user = (if (context.isBlank()) "Request: $task"
+                   else "Request: $task\n\nProgress so far / current state:\n$context\n\nReplan the REMAINING todos.") + facts
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content", PLANNER_SYSTEM))
             .put(JSONObject().put("role", "user").put("content", user))

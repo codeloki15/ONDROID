@@ -53,6 +53,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onManageApps: () -> Unit = {},
     onOpenRoutines: () -> Unit = {},
+    onOpenMemory: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -275,6 +276,28 @@ fun SettingsScreen(
                             Text(
                                 if (uiState.experienceCount == 0) "Nothing learned yet — successful phone tasks are remembered and replayed exactly"
                                 else "${uiState.experienceCount} task${if (uiState.experienceCount == 1) "" else "s"} Omni can repeat — tap to manage & schedule",
+                                style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Icon(
+                            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null,
+                            tint = OmniTextFaint, modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClick = onOpenMemory)
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("What Omni knows about you", style = MaterialTheme.typography.titleSmall, color = OmniText)
+                            Text(
+                                "Personal facts used in every conversation — add, review, or forget them",
                                 style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
                             )
                         }

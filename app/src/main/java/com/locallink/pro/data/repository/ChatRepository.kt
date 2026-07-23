@@ -34,6 +34,7 @@ class ChatRepository @Inject constructor(
     private val openRouter: OpenRouterClient,
     private val settings: SettingsPreferences,
     private val experiences: ExperienceStore,
+    private val memory: MemoryStore,
 ) {
     private companion object { const val TAG = "ChatRepository" }
 
@@ -238,6 +239,8 @@ class ChatRepository @Inject constructor(
         val sessionId = ensureSession(task, now)
         messageDao.insert(MessageEntity(sessionId = sessionId, role = "user", text = task, isVoice = isVoice, timestamp = now))
         touchSession(sessionId)
+        // Mine durable personal facts in the background (never blocks the turn).
+        memory.maybeExtract(task) { p -> openRouter.plainChat(p) }
 
         if (!openRouter.hasKey()) {
             messageDao.insert(MessageEntity(
@@ -326,6 +329,7 @@ class ChatRepository @Inject constructor(
         val sessionId = ensureSession(task, now)
         messageDao.insert(MessageEntity(sessionId = sessionId, role = "user", text = task, timestamp = now))
         touchSession(sessionId)
+        memory.maybeExtract(task) { p -> openRouter.plainChat(p) }
         val service = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
         if (service == null) {
             // No device control available — still answer in plain chat instead of hard-failing.
@@ -421,7 +425,7 @@ class ChatRepository @Inject constructor(
             }
         }
         val executor = com.locallink.pro.service.pilot.PlanExecutor(
-            com.locallink.pro.service.pilot.OpenRouterPlanner(settings), runner,
+            com.locallink.pro.service.pilot.OpenRouterPlanner(settings, { memory.promptBlock() }), runner,
             cancelled = { service.cancelFlag.get() },
             screenSummary = screenSummaryOf(service.asActuator()),
         )
