@@ -135,12 +135,46 @@ class ChatRepository @Inject constructor(
     /** Persist user msg, stream AI reply, persist assistant msg on completion. */
     suspend fun send(text: String, image: Bitmap? = null, imageUri: String? = null, isVoice: Boolean = false) {
         val now = System.currentTimeMillis()
-        val sessionId = ensureSession(text, now)
+        val sessionId = ensureSession(text.ifBlank { "Photo" }, now)
 
         messageDao.insert(
             MessageEntity(sessionId = sessionId, role = "user", text = text, imageUri = imageUri, isVoice = isVoice, timestamp = now)
         )
         touchSession(sessionId)
+
+        // Vision turn: send the photo to the multimodal model ("what am I looking at").
+        if (image != null) {
+            _isAiResponding.value = true
+            try {
+                val prompt = text.ifBlank { "What am I looking at? Describe what's in this photo and anything notable about it." }
+                val jpeg = java.io.ByteArrayOutputStream().use { bos ->
+                    image.compress(Bitmap.CompressFormat.JPEG, 85, bos); bos.toByteArray()
+                }
+                val history = messageDao.getMessages(sessionId)
+                    .filter { it.role == "user" || it.role == "assistant" }
+                    .dropLast(1)
+                    .map { it.role to it.text }
+                val reply = openRouter.visionChat(prompt, jpeg, history)
+                if (reply.isNotBlank()) {
+                    messageDao.insert(MessageEntity(
+                        sessionId = sessionId, role = "assistant", text = reply,
+                        timestamp = System.currentTimeMillis(),
+                    ))
+                    _lastAssistantReply.value = reply
+                } else {
+                    messageDao.insert(MessageEntity(
+                        sessionId = sessionId, role = "system",
+                        text = "Error: couldn't analyze the photo — the selected model may not support images. " +
+                            "Pick a vision-capable model in Settings → AI model.",
+                        timestamp = System.currentTimeMillis(),
+                    ))
+                }
+            } finally {
+                _isAiResponding.value = false
+                touchSession(sessionId)
+            }
+            return
+        }
         generateReply(sessionId, text)
     }
 

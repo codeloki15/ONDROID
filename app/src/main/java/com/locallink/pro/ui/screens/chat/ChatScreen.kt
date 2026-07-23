@@ -144,6 +144,24 @@ fun ChatScreen(
         ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? -> vm.attachImage(uri) }
 
+    // Camera capture ("what am I looking at?") → FileProvider cache URI → attach flow.
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    val takePicture = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { ok -> if (ok) vm.attachImage(cameraUri) }
+    fun launchCamera() {
+        runCatching {
+            val dir = java.io.File(context.cacheDir, "images").apply { mkdirs() }
+            val file = java.io.File(dir, "capture_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.fileprovider", file,
+            )
+            cameraUri = uri
+            takePicture.launch(uri)
+        }
+    }
+    var showAttachMenu by remember { mutableStateOf(false) }
+
     AuroraBackground(glow = 0.16f) {
         Scaffold(
             containerColor = Color.Transparent,
@@ -206,18 +224,34 @@ fun ChatScreen(
                     }
                 }
 
-                InputBar(
-                    input = state.inputText,
-                    onInputChange = vm::updateInput,
-                    onSend = { vm.sendMessage() },
-                    onMic = {
-                        voiceMode = true
-                        if (!state.isListening) vm.toggleVoiceInput()
-                    },
-                    onPickImage = {
-                        pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                )
+                Box {
+                    InputBar(
+                        input = state.inputText,
+                        onInputChange = vm::updateInput,
+                        onSend = { vm.sendMessage() },
+                        onMic = {
+                            voiceMode = true
+                            if (!state.isListening) vm.toggleVoiceInput()
+                        },
+                        onPickImage = { showAttachMenu = true },
+                    )
+                    DropdownMenu(
+                        expanded = showAttachMenu,
+                        onDismissRequest = { showAttachMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Take a photo") },
+                            onClick = { showAttachMenu = false; launchCamera() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Photo library") },
+                            onClick = {
+                                showAttachMenu = false
+                                pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                        )
+                    }
+                }
             }
         }
 

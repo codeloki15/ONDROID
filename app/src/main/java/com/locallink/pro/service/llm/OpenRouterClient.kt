@@ -333,6 +333,48 @@ class OpenRouterClient @Inject constructor(
         runCatching { postChat(key, body).optString("content") }.getOrDefault("")
     }
 
+    /**
+     * Vision turn: prompt + JPEG → answer from the selected model (sent as an OpenAI
+     * content array with a data-URI image, same shape the screen pilot uses). Returns ""
+     * on failure. The model must be multimodal — most current defaults are.
+     */
+    suspend fun visionChat(
+        prompt: String,
+        jpeg: ByteArray,
+        history: List<Pair<String, String>> = emptyList(),
+    ): String = withContext(Dispatchers.IO) {
+        val key = settings.loadOpenRouterApiKey()
+        if (key.isBlank()) return@withContext ""
+        val model = settings.loadOpenRouterModel()
+        val userFacts = runCatching { memory.promptBlock() }.getOrDefault("")
+        val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+        val content = JSONArray()
+            .put(JSONObject().put("type", "text").put("text", prompt))
+            .put(JSONObject().put("type", "image_url")
+                .put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$b64")))
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content",
+                "You are Omni, a helpful assistant with vision. The user shares a photo — " +
+                    "answer naturally and concretely about what's in it.$userFacts"))
+        history.takeLast(8).forEach { (role, text) ->
+            if (text.isNotBlank()) messages.put(JSONObject().put("role", role).put("content", text))
+        }
+        messages.put(JSONObject().put("role", "user").put("content", content))
+        // Try the user's model first; text-only models 404 on image input ("No endpoints
+        // found that support image input") — fall back through known multimodal models.
+        val candidates = listOf(model, "google/gemini-2.5-flash", "google/gemini-2.0-flash-001",
+            "openai/gpt-4o-mini").distinct()
+        for (m in candidates) {
+            val body = JSONObject().put("model", m).put("messages", messages).put("temperature", 0.5)
+            val reply = runCatching { postChat(key, body).optString("content") }.getOrDefault("")
+            if (reply.isNotBlank()) {
+                if (m != model) Log.i(TAG, "visionChat served by fallback model $m")
+                return@withContext reply
+            }
+        }
+        ""
+    }
+
     private fun shortErr(text: String): String = try {
         JSONObject(text).optJSONObject("error")?.optString("message")?.take(160) ?: text.take(160)
     } catch (_: Exception) { text.take(160) }
