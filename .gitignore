@@ -1,9 +1,8 @@
-# On-device model binaries (bundled into APK from assets, not tracked in git)
+# On-device model binaries not currently used by the app (FunctionGemma path is
+# dormant) — kokoro-en-v0_19/model.onnx+voices.bin, kws/*.onnx and the sherpa AAR
+# ARE tracked, via Git LFS (see .gitattributes).
 app/src/main/assets/models/*.litertlm
 app/src/main/assets/models/*.task
-app/src/main/assets/kokoro-en-v0_19/model.onnx
-app/src/main/assets/kokoro-en-v0_19/voices.bin
-app/libs/*.aar
 
 # Local model download cache (outside-tree convenience)
 _models_cache/
@@ -31,7 +30,6 @@ app/build/
 local.properties
 .DS_Store
 **/.DS_Store
-app/src/main/assets/kws/*.onnx
 tools/wakeword-training/venv/
 tools/wakeword-training/piper-sample-generator/
 tools/wakeword-training/data/
