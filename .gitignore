@@ -10,6 +10,12 @@ _models_cache/
 
 # Cloned third-party repos kept locally for reference only (not part of the app)
 externals/
+UI_images_reference
+
+# FunctionGemma weights (on-device tool-routing model, currently dormant) — 1.6GB,
+# exceeds GitHub's 100MB blob limit. Kept locally outside the repo.
+_fg_hf/
+_fg_litertlm/
 
 # Python server venv (legacy server, not part of standalone app)
 server/venv/
