@@ -6,8 +6,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [SessionEntity::class, MessageEntity::class, ExperienceEntity::class, MemoryFactEntity::class],
-    version = 5,
+    entities = [SessionEntity::class, MessageEntity::class, ExperienceEntity::class, MemoryFactEntity::class, NotificationRuleEntity::class],
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -15,6 +15,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun experienceDao(): ExperienceDao
     abstract fun memoryFactDao(): MemoryFactDao
+    abstract fun notificationRuleDao(): NotificationRuleDao
 
     companion object {
         /** v1 → v2: learned pilot routines ("experiences"). */
@@ -43,6 +44,25 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `experiences` ADD COLUMN `slotResidual` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** v5 → v6: notification trigger rules. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `notification_rules` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `appPackage` TEXT NOT NULL,
+                        `matchText` TEXT NOT NULL,
+                        `action` TEXT NOT NULL,
+                        `agentTask` TEXT NOT NULL,
+                        `enabled` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
             }
         }
 

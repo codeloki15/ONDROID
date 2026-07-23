@@ -54,6 +54,7 @@ fun SettingsScreen(
     onManageApps: () -> Unit = {},
     onOpenRoutines: () -> Unit = {},
     onOpenMemory: () -> Unit = {},
+    onOpenNotifyRules: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -298,6 +299,31 @@ fun SettingsScreen(
                             Text("What Omni knows about you", style = MaterialTheme.typography.titleSmall, color = OmniText)
                             Text(
                                 "Personal facts used in every conversation — add, review, or forget them",
+                                style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Icon(
+                            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null,
+                            tint = OmniTextFaint, modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+
+                // ── Triggers ─────────────────────────────────────────────
+                SettingsSection(title = "Triggers") {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClick = onOpenNotifyRules)
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Notification triggers", style = MaterialTheme.typography.titleSmall, color = OmniText)
+                            Text(
+                                "React to incoming notifications — read them aloud or run a task",
                                 style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
                             )
                         }
