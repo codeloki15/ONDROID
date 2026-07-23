@@ -30,7 +30,8 @@ class ExperienceReplayer(
                 }
             } else {
                 when (step.action) {
-                    "swipe", "scroll" -> actuator.swipe(step.arg ?: "down")
+                    "swipe" -> actuator.swipe(step.arg ?: "down")
+                    "scroll" -> actuator.swipe(ScrollMap.toSwipe(step.arg ?: "down"))
                     "launch_app" -> actuator.launchApp(step.arg ?: return "step ${i + 1}: launch_app without app")
                     "back" -> actuator.back()
                     "home" -> actuator.home()

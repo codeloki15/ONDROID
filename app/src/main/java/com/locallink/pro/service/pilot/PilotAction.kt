@@ -23,6 +23,20 @@ sealed interface PilotAction {
     data class Invalid(val reason: String) : PilotAction
 }
 
+/**
+ * Scroll semantics → finger-swipe mapping. "Scroll down" means reveal content BELOW,
+ * which requires the finger to drag UP (content moves up). Same inversion horizontally.
+ */
+object ScrollMap {
+    fun toSwipe(dir: String): String = when (dir) {
+        "down" -> "up"
+        "up" -> "down"
+        "left" -> "right"
+        "right" -> "left"
+        else -> dir
+    }
+}
+
 object PilotActionParser {
     /** Every action the model may emit. Kept in sync with [PilotActionSchema.toolsJson]. */
     val ALLOWED = setOf(

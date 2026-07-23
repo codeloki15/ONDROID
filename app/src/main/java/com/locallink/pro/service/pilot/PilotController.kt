@@ -99,8 +99,10 @@ class PilotController(
             if (actuator.cancelled()) { emit(AgentEvent.Final("Stopped.")); return@flow }
 
             // Stuck guard: same action on the same screen 3x running → give up (not just any repeat,
-            // so legit waits/re-scrolls aren't cut short).
-            val actionSig = "$screenSig##$name$args"
+            // so legit waits/re-scrolls aren't cut short). Args are whitespace-canonicalized —
+            // the model's JSON formatting varies call-to-call and must not defeat the guard.
+            val canonArgs = args.filterNot { it.isWhitespace() }
+            val actionSig = "$screenSig##$name$canonArgs"
             if (actionSig == lastActionSig) stuckCount++ else stuckCount = 0
             lastActionSig = actionSig
             if (stuckCount >= 2) {
@@ -109,7 +111,7 @@ class PilotController(
             }
 
             // Repeat-blocker: refuse to re-execute an action already tried twice on this screen.
-            val attemptKey = "$screenSig##$name$args"
+            val attemptKey = "$screenSig##$name$canonArgs"
             val tries = attempted.getOrDefault(attemptKey, 0)
             if (tries >= 2) {
                 history.add(
@@ -195,7 +197,8 @@ class PilotController(
             is PilotAction.Clear -> el(action.id)?.let { actuator.clear(it) to "cleared id ${action.id}" }
                 ?: (false to "clear: no element id ${action.id}")
             is PilotAction.Swipe -> actuator.swipe(action.direction) to "swiped ${action.direction}"
-            is PilotAction.Scroll -> actuator.swipe(action.direction) to "scrolled ${action.direction}"
+            // scroll(dir) reveals content in that direction → finger swipes the OPPOSITE way.
+            is PilotAction.Scroll -> actuator.swipe(ScrollMap.toSwipe(action.direction)) to "scrolled ${action.direction}"
             is PilotAction.LaunchApp -> actuator.launchApp(action.query) to "launched app: ${action.query}"
             is PilotAction.Back -> actuator.back() to "pressed back"
             is PilotAction.Home -> actuator.home() to "went home"
