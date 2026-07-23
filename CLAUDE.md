@@ -1,133 +1,79 @@
-# LocalLink Pro - Project Reference
+# OmniPro — Project Reference
 
-## Project Overview
-LocalLink Pro is a multi-transport Android-to-Desktop bridge with AI messaging. The Android app connects to a Python desktop server via Bluetooth SPP or WebSocket, sends user messages (text or voice), and receives AI-generated responses with streaming support and text-to-speech playback.
+## What this is
 
-## Architecture
+OmniPro (`com.locallink.pro`) is a standalone Android AI assistant (Kotlin + Jetpack
+Compose) with three entry modes wired to distinct backends:
 
-### Android App (Kotlin + Jetpack Compose)
+| Mode (home card) | Backend entry | Capabilities |
+|---|---|---|
+| New chat | `ChatRepository.runChatOnly` → `runChatWithTools` | LLM chat + Composio cloud tools (web search, Gmail, Slack, …) |
+| Voice chat | same as chat, `isVoice=true` | + on-device STT (Parakeet/sherpa-onnx) and streaming TTS (Kokoro) |
+| Automate my phone | `ChatRepository.runAgent` | planner + screen pilot via AccessibilityService; learns & replays routines. **Never routes through Composio.** |
+
+The AI brain is cloud-only via OpenRouter (BYO key). On-device LLM code
+(Qwen/FunctionGemma) exists but is dormant — not routed to.
+
+## Architecture map
+
 ```
 app/src/main/java/com/locallink/pro/
-├── LocalLinkApplication.kt          # Hilt Application entry point
-├── di/
-│   └── AppModule.kt                 # Hilt dependency injection module
-├── domain/model/
-│   ├── Message.kt                   # Chat message domain model
-│   ├── ConnectionState.kt           # Connection state + transport enums
-│   └── DeviceInfo.kt                # Bluetooth device + connection profiles
-├── data/
-│   ├── model/
-│   │   └── ProtocolMessage.kt       # Wire protocol JSON message format
-│   └── repository/
-│       └── ChatRepository.kt        # Message store + incoming message handler
-├── service/
-│   ├── transport/
-│   │   ├── TransportLayer.kt        # Abstract transport interface
-│   │   ├── TransportManager.kt      # Active transport selector + unified API
-│   │   └── ProtocolSerializer.kt    # JSON serialization/deserialization
-│   ├── bluetooth/
-│   │   ├── BluetoothTransport.kt    # Bluetooth SPP transport implementation
-│   │   └── BluetoothConnectionService.kt  # Foreground service for BT
-│   ├── websocket/
-│   │   └── WebSocketTransport.kt    # WebSocket (OkHttp) transport implementation
-│   └── voice/
-│       └── VoiceService.kt          # STT (SpeechRecognizer) + TTS service
-└── ui/
-    ├── MainActivity.kt              # Entry activity, permissions, Compose host
-    ├── theme/
-    │   ├── Color.kt                 # Color palette (BT blue, SSH green, etc.)
-    │   └── Theme.kt                 # Material 3 theme with dynamic colors
-    ├── navigation/
-    │   └── NavGraph.kt              # Navigation routes (connection → chat → settings)
-    └── screens/
-        ├── connection/
-        │   ├── ConnectionScreen.kt  # Transport selector, BT devices, WS config
-        │   └── ConnectionViewModel.kt
-        ├── chat/
-        │   ├── ChatScreen.kt        # Message bubbles, streaming, voice input bar
-        │   └── ChatViewModel.kt
-        └── settings/
-            ├── SettingsScreen.kt    # TTS speed/pitch, auto-TTS, reconnect toggles
-            └── SettingsViewModel.kt
+├── data/repository/ChatRepository.kt      # mode routing, agent serialization (one run at a time)
+├── data/db/                               # Room: sessions, messages, experiences (v3)
+├── service/llm/
+│   ├── OpenRouterClient.kt                # chat + Composio MCP meta-tool loop (run()), plainChat()
+│   ├── ComposioMcpClient.kt               # Composio Tool Router over MCP (search/execute/connect)
+│   └── ComposioClient.kt                  # REST: app grid, OAuth connect/disconnect
+├── service/pilot/                         # Automate: PlanExecutor, PilotController, MemoryPilot,
+│   │                                      #   ExperienceReplayer (learned routines), OmniAccessibilityService
+│   └── PilotActionSchema.kt               # the pilot's action-space prompt
+├── service/voice/
+│   ├── VoiceLoopController.kt             # hands-free "Hey Omni" state machine (mic is single-owner!)
+│   ├── WakeWordEngine.kt                  # sherpa-onnx KeywordSpotter (assets/kws)
+│   ├── ParakeetSttEngine.kt + SttModelManager.kt   # on-device STT (~670MB, downloaded in-app)
+│   └── KokoroTtsService.kt                # streaming TTS (assets/kokoro-en-v0_19)
+└── ui/screens/                            # Compose: sessions (home), chat, connect (Composio), settings
 ```
 
-### Python Server
-```
-server/
-├── server.py          # Main entry — WebSocket server + optional BT SPP server
-├── protocol.py        # Protocol message classes matching Android client
-├── ai_handler.py      # AI provider abstraction (OpenAI, Ollama, Mock)
-├── config.py          # Configuration loader from .env
-├── requirements.txt   # Python dependencies
-└── .env.example       # Environment variable template
-```
+## Hard-won constraints — do not regress
 
-## Key Design Decisions
+1. **sherpa-onnx JNI callbacks must be explicit `object : Function1<…>`, never Kotlin
+   lambdas.** Kotlin 2.x lambdas compile via invokedynamic; the desugared class lacks the
+   specialized `invoke` signature the native side looks up → process SIGABRT.
+2. **The mic is single-owner** — wake engine, STT, TTS are time-exclusive.
+   `WakeWordEngine.stop()` must stay synchronous (joins its worker) and be called
+   off-main; otherwise STT gets `ERROR_NO_MATCH` from mic contention.
+3. **KWS models must be the fp32 export** of
+   `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01` — the `-mobile` int8 encoder
+   has an incompatible streaming export and aborts natively in `KeywordSpotter.decode`.
+4. **Agent runs are serialized** (`ChatRepository.serialized`) — two concurrent pilot
+   runs fight over the one screen and both spiral into replans.
+5. Composio powers **chat and voice only**; Automate's planner emits only chat/pilot
+   channels by design.
 
-### Communication Protocol
-- **Format**: JSON over newline-delimited text streams (BT) or WebSocket text frames
-- **Why not Protobuf**: JSON is simpler to debug, works natively in Python, and the message sizes are small enough that protobuf overhead savings don't matter
-- **Message types**: `ai_request`, `ai_response`, `ai_stream_start`, `ai_stream_chunk`, `ai_stream_end`, `ping`/`pong`, `error`
+## Model assets (Git LFS)
 
-### Transport Architecture
-- `TransportLayer` interface is implemented by both `BluetoothTransport` and `WebSocketTransport`
-- `TransportManager` wraps the active transport and provides a unified send/receive API
-- All transports use Kotlin `StateFlow` for connection state and `SharedFlow` for incoming messages
+`app/libs/sherpa-onnx-1.12.23.aar`, `assets/kokoro-en-v0_19/{model.onnx,voices.bin}`,
+`assets/kws/*.onnx` are tracked via **Git LFS**. `assets/kws/keywords.txt` is the
+custom "Hey Omni" keyword spec — never overwrite it with a release tarball's copy.
 
-### AI Streaming
-- Server streams AI responses token-by-token via `ai_stream_start` → N × `ai_stream_chunk` → `ai_stream_end`
-- Android `ChatRepository` buffers streaming tokens in `streamingText` StateFlow
-- UI shows a blinking cursor during streaming
+## Build & test
 
-### Voice Pipeline
-- **STT**: Android `SpeechRecognizer` with partial results → auto-sends on final result
-- **TTS**: Android `TextToSpeech` engine → auto-speaks AI responses (toggleable)
-- Voice input shows a pulsing mic button and partial transcription above the input bar
-
-## Build & Run
-
-### Android App
-1. Open in Android Studio
-2. Sync Gradle
-3. Run on device/emulator (API 26+)
-
-### Python Server
 ```bash
-cd server
-pip install -r requirements.txt
-cp .env.example .env   # Edit with your AI provider config
-python server.py
+./gradlew :app:assembleDebug       # APK → app/build/outputs/apk/debug/
+./gradlew test                     # JVM unit tests (pilot/experience suites)
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### Quick Test (Mock AI)
-1. Start server: `python server.py` (defaults to mock AI on port 8765)
-2. In the Android app, select WebSocket, enter your computer's IP, connect
-3. Type or speak a message — you'll get mock AI responses
-
-### Real AI Setup
-Edit `server/.env`:
-- **OpenAI**: Set `AI_PROVIDER=openai` and `OPENAI_API_KEY=sk-...`
-- **Ollama**: Set `AI_PROVIDER=ollama` (requires Ollama running locally)
-
-## Dependencies
-
-### Android
-- Jetpack Compose + Material 3
-- Hilt (DI)
-- OkHttp (WebSocket)
-- Gson (JSON)
-- SSHJ (SSH tunneling — future)
-- Room (local DB — future)
-
-### Python
-- `websockets` — WebSocket server
-- `openai` — OpenAI API client
-- `aiohttp` — HTTP client for Ollama
-- `python-dotenv` — Config loading
-- `pybluez2` — Bluetooth SPP (Linux only, optional)
+JDK 17 (Android Studio JBR works: `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`).
 
 ## Conventions
-- **Android**: MVI architecture, Kotlin coroutines + Flow, Hilt DI
-- **Server**: asyncio, dataclasses, type hints
-- **Protocol**: All message types defined as constants in both `MessageTypes` (Android) and `MessageTypes` (Python) — keep in sync
-- **Naming**: `TransportLayer` = abstract interface, `*Transport` = concrete implementation
+
+- MVI-ish: StateFlow UI state, Hilt DI, Room, DataStore prefs (`SettingsPreferences`)
+- Design system: "Porcelain" light theme — warm off-white `#F7F5F3`, ink text, pastel
+  lavender/mint washes, black CTA pills (`GradientPill`), violet→pink orb identity,
+  Epilogue font. Components in `ui/components/` (AuroraBackground, ParticleSphere, pills).
+- Wire protocol for tools: OpenAI-style function calling; Composio meta-tools are the
+  only top-level tools (`COMPOSIO_SEARCH_TOOLS` → `COMPOSIO_MULTI_EXECUTE_TOOL`).
+
+See [SETUP.md](SETUP.md) for user-facing installation and configuration.
