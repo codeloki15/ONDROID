@@ -9,7 +9,8 @@ _models_cache/
 
 # Cloned third-party repos kept locally for reference only (not part of the app)
 externals/
-UI_images_reference
+UI_images_reference/
+docs/
 
 # FunctionGemma weights (on-device tool-routing model, currently dormant) — 1.6GB,
 # exceeds GitHub's 100MB blob limit. Kept locally outside the repo.
@@ -34,3 +35,9 @@ tools/wakeword-training/venv/
 tools/wakeword-training/piper-sample-generator/
 tools/wakeword-training/data/
 tools/wakeword-training/generated/
+
+# Internal/dev-only content kept local (not part of the public repo)
+server/
+scripts/
+ANDROID_SECURITY.md
+APK_file/
