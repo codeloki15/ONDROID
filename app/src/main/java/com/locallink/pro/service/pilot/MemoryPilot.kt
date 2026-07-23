@@ -25,6 +25,8 @@ class MemoryPilot(
     private val find: suspend (String) -> SavedExperience?,
     private val save: suspend (String, List<TraceStep>) -> Unit,
     private val bump: suspend (Long) -> Unit,
+    /** Live mid-run question channel (input floater); null → asks end the run. */
+    private val askUser: (suspend (String) -> String?)? = null,
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
         val exp = runCatching { find(task) }.getOrNull()
@@ -49,6 +51,7 @@ class MemoryPilot(
                 actuator = actuator,
                 screenshot = screenshot,
                 onTrace = { steps -> runCatching { save(task, steps) } },
+                askUser = askUser,
             ).run(task),
         )
     }.flowOn(Dispatchers.IO)

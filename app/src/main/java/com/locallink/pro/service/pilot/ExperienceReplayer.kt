@@ -42,7 +42,8 @@ class ExperienceReplayer(
                 }
             }
             if (!ok) return "step ${i + 1}: ${step.action} failed"
-            delay(settleMs)
+            // App launches settle longer (cold starts) so the next locate sees the new screen.
+            delay(if (step.action == "launch_app") settleMs * 2 else settleMs)
         }
         return null
     }

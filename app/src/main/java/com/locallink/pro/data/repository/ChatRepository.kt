@@ -20,6 +20,8 @@ import com.locallink.pro.service.pilot.OpenRouterPilotReasoner
 import com.locallink.pro.service.pilot.PilotActuator
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,15 +37,55 @@ class ChatRepository @Inject constructor(
 ) {
     private companion object { const val TAG = "ChatRepository" }
 
+    // ── One agent at a time ──────────────────────────────────────────────
+    // Agent runs drive the ONE physical screen; two concurrent runs yank apps out from
+    // under each other and both spiral into replans. New runs queue behind the active one.
+    private val agentMutex = Mutex()
+    @Volatile private var activeTask: String? = null
+
+    /** Wrap an agent flow so executions are strictly serialized on the shared screen. */
+    private fun serialized(task: String, inner: Flow<AgentEvent>): Flow<AgentEvent> = flow {
+        agentMutex.withLock {
+            activeTask = task
+            _isAiResponding.value = true
+            try { emitAll(inner) } finally { activeTask = null }
+        }
+    }
+
+    /** If a run is active, tell the user this one is queued (persisted as a system note). */
+    private suspend fun noteIfQueued(sessionId: String, task: String) {
+        val current = activeTask
+        if (agentMutex.isLocked && current != null) {
+            messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "system",
+                text = "⏳ Queued — I'll start “$task” after finishing “$current”.",
+                timestamp = System.currentTimeMillis(),
+            ))
+        }
+    }
+
     /** Pilot with experience memory: replay learned routines first, reason only when needed. */
-    private fun memoryPilot(actuator: PilotActuator): MemoryPilot = MemoryPilot(
+    private fun memoryPilot(
+        actuator: PilotActuator,
+        askUser: (suspend (String) -> String?)? = null,
+    ): MemoryPilot = MemoryPilot(
         reasoner = OpenRouterPilotReasoner(settings),
         actuator = actuator,
         screenshot = { com.locallink.pro.service.pilot.PilotProjectionHolder.capture() },
         find = { task -> experiences.find(task) },
         save = { task, steps -> experiences.save(task, steps) },
         bump = { id -> experiences.bump(id) },
+        askUser = askUser,
     )
+
+    /** A short "what's on screen" line for grounding replans. */
+    private fun screenSummaryOf(actuator: PilotActuator): suspend () -> String = {
+        runCatching {
+            actuator.perceive()
+                .mapNotNull { e -> (e.text ?: e.desc)?.takeIf { it.isNotBlank() } }
+                .distinct().take(18).joinToString(", ")
+        }.getOrDefault("")
+    }
 
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
@@ -131,8 +173,21 @@ class ChatRepository @Inject constructor(
         // going to the background when Pilot navigates into another app. Each event is persisted to
         // the DB from that scope; the UI "responding" flag is cleared when the terminal Final event
         // is persisted (see persistPilotEvent). runPilotFlow returns immediately.
+        // Mid-run questions pause the loop with the floater; answers persist as user messages.
+        val liveAsk: suspend (String) -> String? = { q ->
+            val a = service.requestInput(q, null)
+            if (!a.isNullOrBlank()) {
+                messageDao.insert(MessageEntity(
+                    sessionId = sessionId, role = "user", text = a,
+                    timestamp = System.currentTimeMillis(),
+                ))
+                touchSession(sessionId)
+            }
+            a
+        }
+        noteIfQueued(sessionId, task)
         service.runPilotFlow(
-            flow = memoryPilot(service.asActuator()).run(task),
+            flow = serialized(task, memoryPilot(service.asActuator(), askUser = liveAsk).run(task)),
             onEvent = { event -> persistPilotEvent(sessionId, event) },
             onComplete = { cause ->
                 if (cause != null && cause !is kotlinx.coroutines.CancellationException) {
@@ -159,10 +214,15 @@ class ChatRepository @Inject constructor(
         val service = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
         if (service == null) {
             // No device control available — still answer in plain chat instead of hard-failing.
-            // Only phone-control tasks genuinely need the accessibility service.
+            // Only phone-control tasks genuinely need the accessibility service. Tell the model
+            // it can't act so it never pretends to ("Opening Settings app…").
             _isAiResponding.value = true
             try {
-                val reply = openRouter.plainChat(task)
+                val reply = openRouter.plainChat(
+                    "$task\n\n(System note: you can NOT control the phone right now — the " +
+                        "accessibility service is off. Answer in text; if the request needs " +
+                        "device control, say so briefly and point to Settings → Accessibility → OmniPro.)",
+                )
                 if (reply.isNotBlank()) {
                     messageDao.insert(MessageEntity(sessionId = sessionId, role = "assistant",
                         text = reply, timestamp = System.currentTimeMillis()))
@@ -192,7 +252,10 @@ class ChatRepository @Inject constructor(
             override suspend fun composio(todo: String): String = openRouter.plainChat(todo)
             override suspend fun pilot(todo: String): Boolean {
                 var stuck = false
-                memoryPilot(service.asActuator()).run(todo).collect { e ->
+                memoryPilot(
+                    service.asActuator(),
+                    askUser = { q -> requestInput(q, null) },
+                ).run(todo).collect { e ->
                     when (e) {
                         is AgentEvent.Final -> if (e.text.startsWith("Stopped")) stuck = true
                         is AgentEvent.ToolCall, is AgentEvent.ToolResult -> persistPilotEvent(sessionId, e)
@@ -201,14 +264,28 @@ class ChatRepository @Inject constructor(
                 }
                 return !stuck
             }
-            override suspend fun requestInput(question: String, reason: String?): String? =
-                service.requestInput(question, reason)
+            override suspend fun requestInput(question: String, reason: String?): String? {
+                val answer = service.requestInput(question, reason)
+                // Persist the user's floater answer so the conversation (and any replan)
+                // actually contains what they said.
+                if (!answer.isNullOrBlank()) {
+                    messageDao.insert(MessageEntity(
+                        sessionId = sessionId, role = "user",
+                        text = answer, timestamp = System.currentTimeMillis(),
+                    ))
+                    touchSession(sessionId)
+                }
+                return answer
+            }
         }
         val executor = com.locallink.pro.service.pilot.PlanExecutor(
             com.locallink.pro.service.pilot.OpenRouterPlanner(settings), runner,
+            cancelled = { service.cancelFlag.get() },
+            screenSummary = screenSummaryOf(service.asActuator()),
         )
+        noteIfQueued(sessionId, task)
         service.runPilotFlow(
-            flow = executor.run(task),
+            flow = serialized(task, executor.run(task)),
             onEvent = { persistPilotEvent(sessionId, it) },
             onComplete = { _ -> _isAiResponding.value = false; touchSession(sessionId) },
         )

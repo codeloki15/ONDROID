@@ -44,6 +44,11 @@ class PilotController(
     private val maxSteps: Int = 25,
     /** Called with the successful action trace when the run ends in Done — experience learning. */
     private val onTrace: (suspend (List<TraceStep>) -> Unit)? = null,
+    /**
+     * Live user-input channel: when the model asks a question mid-run, this pauses the loop
+     * (input floater) and resumes with the answer. Null → an ask ends the run (legacy).
+     */
+    private val askUser: (suspend (String) -> String?)? = null,
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
         val history = ArrayList<String>()
@@ -69,7 +74,15 @@ class PilotController(
                     }
                     emit(AgentEvent.Final(action.result)); return@flow
                 }
-                is PilotAction.Ask -> { emit(AgentEvent.Final(action.question)); return@flow }
+                is PilotAction.Ask -> {
+                    val ask = askUser
+                    if (ask == null) { emit(AgentEvent.Final(action.question)); return@flow }
+                    emit(AgentEvent.InputRequested(action.question, null))
+                    val answer = ask(action.question)
+                    if (answer.isNullOrBlank()) { emit(AgentEvent.Final("Stopped — no input provided.")); return@flow }
+                    history.add("asked user: \"${action.question}\" → they said: \"$answer\"")
+                    continue
+                }
                 is PilotAction.Invalid -> { history.add("invalid action: ${action.reason}"); continue }
                 else -> {}
             }
@@ -96,17 +109,42 @@ class PilotController(
             }
             // Let the screen settle after actions that navigate/transition, so the NEXT perceive
             // (and screenshot) reflect the new screen — this is what stops the model re-issuing the
-            // same tap because the old screen was still showing.
-            if (ok && action.changesScreen()) kotlinx.coroutines.delay(SETTLE_MS)
+            // same tap because the old screen was still showing. App launches are the slowest
+            // transition (cold starts, splash screens) and get extra time.
+            if (ok && action.changesScreen()) {
+                kotlinx.coroutines.delay(if (action is PilotAction.LaunchApp) LAUNCH_SETTLE_MS else SETTLE_MS)
+            }
         }
         emit(AgentEvent.Final("Stopped after $maxSteps steps."))
     }.flowOn(Dispatchers.IO) // network (reasoner) + a11y calls must run off the main thread
+
+    /**
+     * Re-locate a chosen element on the CURRENT screen before acting. The model picked its id
+     * from a snapshot taken before a slow LLM round-trip — the screen may have shifted since.
+     * Identity match (resId/text/desc) on a fresh perceive gives correct bounds; a vanished
+     * target fails cleanly instead of tapping whatever moved into its place.
+     */
+    private fun freshen(target: PilotElement): PilotElement? {
+        val anonymous = target.resId.isNullOrBlank() && target.text.isNullOrBlank() && target.desc.isNullOrBlank()
+        if (anonymous) return target // nothing durable to match on — act on the snapshot node
+        val fresh = actuator.perceive()
+        fresh.firstOrNull {
+            it.resId == target.resId && it.text == target.text && it.desc == target.desc && it.cls == target.cls
+        }?.let { return it }
+        target.resId?.takeIf { it.isNotBlank() }?.let { r -> fresh.firstOrNull { it.resId == r }?.let { return it } }
+        target.text?.takeIf { it.isNotBlank() }?.let { t -> fresh.firstOrNull { it.text == t }?.let { return it } }
+        target.desc?.takeIf { it.isNotBlank() }?.let { d -> fresh.firstOrNull { it.desc == d }?.let { return it } }
+        return null
+    }
 
     /** Perform one non-terminal action; returns (success, human note for history/UI). */
     private suspend fun execute(
         action: PilotAction, elements: List<PilotElement>,
     ): Pair<Boolean, String> {
-        fun el(id: Int) = elements.firstOrNull { it.id == id }
+        fun el(id: Int): PilotElement? {
+            val chosen = elements.firstOrNull { it.id == id } ?: return null
+            return freshen(chosen)
+        }
         return when (action) {
             is PilotAction.Tap -> el(action.id)?.let { actuator.tap(it) to "tapped id ${action.id} (${it.label()})" }
                 ?: (false to "tap: no element id ${action.id}")
@@ -181,6 +219,7 @@ class PilotController(
 
     private companion object {
         const val SETTLE_MS = 700L
-        const val MAX_TRACE_STEPS = 15  // longer flows are too fragile to replay verbatim
+        const val LAUNCH_SETTLE_MS = 1600L  // app launches need splash/cold-start time
+        const val MAX_TRACE_STEPS = 15      // longer flows are too fragile to replay verbatim
     }
 }

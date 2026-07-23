@@ -16,6 +16,10 @@ class PlanExecutor(
     private val runner: ChannelRunner,
     private val maxSteps: Int = 25,
     private val maxReplans: Int = 3,
+    /** True once the user hit STOP — aborts the whole plan instead of replanning around it. */
+    private val cancelled: () -> Boolean = { false },
+    /** Short description of what's on screen right now — grounds replans in reality. */
+    private val screenSummary: suspend () -> String = { "" },
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
         var plan = planner.plan(task, "")
@@ -25,22 +29,27 @@ class PlanExecutor(
         var replans = 0
         var i = 0
         while (i < plan.todos.size) {
+            if (cancelled()) { emit(AgentEvent.Final("Stopped.")); return@flow }
             if (steps++ >= maxSteps) { emit(AgentEvent.Final("Paused after $maxSteps steps.")); return@flow }
             val todo = plan.todos[i]
             emit(AgentEvent.TodoStatus(i, todo.text, done = false))
 
             var answer: String? = null
             if (todo.needsInput) {
-                emit(AgentEvent.InputRequested(todo.text, todo.inputReason))
-                answer = runner.requestInput(todo.text, todo.inputReason)
+                // Ask with the planner's question phrasing when it gave one; the todo text is context.
+                val question = todo.inputReason?.takeIf { it.isNotBlank() } ?: todo.text
+                val context = todo.text.takeIf { it != question }
+                emit(AgentEvent.InputRequested(question, context))
+                answer = runner.requestInput(question, context)
                 if (answer == null) { emit(AgentEvent.Final("Stopped — no input provided.")); return@flow }
             }
 
+            val withAnswer = if (answer != null) "${todo.text} [user said: $answer]" else todo.text
             val ok: Boolean = when (todo.channel) {
                 // A chat todo's reply IS a user-facing answer — emit it so it persists as a message.
-                Channel.CHAT -> { emit(AgentEvent.AssistantSay(runner.chat(todo.text))); true }
-                Channel.COMPOSIO -> { emit(AgentEvent.AssistantSay(runner.composio(todo.text))); true }
-                Channel.PILOT -> runner.pilot(if (answer != null) "${todo.text} [user said: $answer]" else todo.text)
+                Channel.CHAT -> { emit(AgentEvent.AssistantSay(runner.chat(withAnswer))); true }
+                Channel.COMPOSIO -> { emit(AgentEvent.AssistantSay(runner.composio(withAnswer))); true }
+                Channel.PILOT -> runner.pilot(withAnswer)
             }
 
             if (ok) {
@@ -48,8 +57,14 @@ class PlanExecutor(
                 done.add(todo.text)
                 i++
             } else {
+                // The user pressing STOP surfaces as a failed pilot leg — abort, don't replan.
+                if (cancelled()) { emit(AgentEvent.Final("Stopped.")); return@flow }
                 if (replans++ >= maxReplans) { emit(AgentEvent.Final("Stopped — couldn't complete after re-planning.")); return@flow }
-                val ctx = "Completed: ${done.joinToString("; ")}. Stuck on: ${todo.text}."
+                val screen = runCatching { screenSummary() }.getOrDefault("")
+                val ctx = buildString {
+                    append("Completed: ${done.joinToString("; ")}. Stuck on: ${todo.text}.")
+                    if (screen.isNotBlank()) append("\nOn screen right now: $screen")
+                }
                 plan = planner.plan(task, ctx)
                 emit(AgentEvent.Plan(plan.todos))
                 i = 0

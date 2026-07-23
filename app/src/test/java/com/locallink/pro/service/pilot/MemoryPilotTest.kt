@@ -73,6 +73,29 @@ class MemoryPilotTest {
         assertNull("done-only run has no executed steps to save", saved)
     }
 
+    @Test fun liveAskPausesAndResumesWithTheAnswer() = runTest {
+        val actuator = FakeActuator(listOf(el(0, text = "Search")))
+        var call = 0
+        var historySeen: List<String>? = null
+        val pilot = MemoryPilot(
+            reasoner = { _, _, _, history ->
+                call++
+                if (call == 1) "ask" to """{"question":"Which song?"}"""
+                else { historySeen = history.toList(); "done" to """{"result":"played"}""" }
+            },
+            actuator = actuator,
+            find = { null },
+            save = { _, _ -> },
+            bump = { },
+            askUser = { q -> "Lo-fi beats" },
+        )
+        val events = pilot.run("play music").toList()
+        // The ask paused the loop, the answer entered history, and the run CONTINUED to done.
+        assertEquals("played", (events.last() as AgentEvent.Final).text)
+        assertTrue(events.any { it is AgentEvent.InputRequested })
+        assertTrue(historySeen!!.any { it.contains("Lo-fi beats") })
+    }
+
     @Test fun learnsTraceFromFreshRunAndSavesIt() = runTest {
         val actuator = FakeActuator(listOf(el(0, text = "Wi-Fi", resId = "settings:id/wifi")))
         var saved: List<TraceStep>? = null
