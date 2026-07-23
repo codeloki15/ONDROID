@@ -81,6 +81,7 @@ import com.locallink.pro.ui.theme.*
 fun ChatScreen(
     sessionId: String?,
     startVoice: Boolean = false,
+    mode: String = "auto",
     onBack: () -> Unit,
     onNavigateToSettings: () -> Unit,
     vm: ChatViewModel = hiltViewModel(),
@@ -89,6 +90,8 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     var voiceMode by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(mode) { vm.setMode(mode) }
 
     // Auto-open OAuth links (agent connecting an app mid-chat) in a Custom Tab.
     LaunchedEffect(Unit) {

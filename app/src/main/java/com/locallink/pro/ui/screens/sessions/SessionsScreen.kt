@@ -45,7 +45,9 @@ import kotlin.math.abs
 @Composable
 fun SessionsScreen(
     onOpenSession: (String?) -> Unit,
+    onOpenChat: () -> Unit = { onOpenSession(null) },
     onOpenVoice: () -> Unit = { onOpenSession(null) },
+    onOpenAutomate: () -> Unit = { onOpenSession(null) },
     onOpenSettings: () -> Unit,
     vm: SessionsViewModel = hiltViewModel(),
 ) {
@@ -103,9 +105,9 @@ fun SessionsScreen(
                         Modifier.padding(top = 22.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        item { ActionCard("New\nchat", onClick = { onOpenSession(null) }) }
+                        item { ActionCard("New\nchat", onClick = onOpenChat) }
                         item { ActionCard("Voice\nchat", onClick = onOpenVoice) }
-                        item { ActionCard("Automate\nmy phone", onClick = { onOpenSession(null) }) }
+                        item { ActionCard("Automate\nmy phone", onClick = onOpenAutomate) }
                     }
                 }
                 item {

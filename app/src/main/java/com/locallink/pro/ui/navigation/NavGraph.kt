@@ -33,26 +33,36 @@ fun LocalLinkNavGraph(navController: NavHostController) {
         composable(Routes.SESSIONS) {
             SessionsScreen(
                 onOpenSession = { id ->
-                    navController.navigate("${Routes.CHAT}?sessionId=${id ?: ""}")
+                    // History and the FAB open in full-capability mode.
+                    navController.navigate("${Routes.CHAT}?sessionId=${id ?: ""}&mode=auto")
+                },
+                onOpenChat = {
+                    navController.navigate("${Routes.CHAT}?sessionId=&mode=chat")
                 },
                 onOpenVoice = {
-                    navController.navigate("${Routes.CHAT}?sessionId=&voice=true")
+                    navController.navigate("${Routes.CHAT}?sessionId=&voice=true&mode=voice")
+                },
+                onOpenAutomate = {
+                    navController.navigate("${Routes.CHAT}?sessionId=&mode=auto")
                 },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
         }
         composable(
-            "${Routes.CHAT}?sessionId={sessionId}&voice={voice}",
+            "${Routes.CHAT}?sessionId={sessionId}&voice={voice}&mode={mode}",
             arguments = listOf(
                 navArgument("sessionId") { type = NavType.StringType; defaultValue = "" },
                 navArgument("voice") { type = NavType.BoolType; defaultValue = false },
+                navArgument("mode") { type = NavType.StringType; defaultValue = "auto" },
             ),
         ) { entry ->
             val sid = entry.arguments?.getString("sessionId")?.ifBlank { null }
             val voice = entry.arguments?.getBoolean("voice") ?: false
+            val mode = entry.arguments?.getString("mode") ?: "auto"
             ChatScreen(
                 sessionId = sid,
                 startVoice = voice,
+                mode = mode,
                 onBack = { navController.popBackStack() },
                 onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
             )

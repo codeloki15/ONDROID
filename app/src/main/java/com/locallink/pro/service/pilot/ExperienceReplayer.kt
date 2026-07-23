@@ -14,8 +14,25 @@ class ExperienceReplayer(
     private val locateRetries: Int = 3,
     private val retryDelayMs: Long = 800L,
 ) {
+    /**
+     * @property failedAt index of the first step that could not run (-1 = full success).
+     * @property executedNotes human notes for the steps that DID run — primes the
+     *   reasoning loop when it continues a partially-replayed routine.
+     */
+    data class Outcome(val failedAt: Int, val reason: String?, val executedNotes: List<String>) {
+        val fullSuccess: Boolean get() = failedAt < 0
+    }
+
+    /** Replay all [steps]; stops at the first divergence and reports how far it got. */
+    suspend fun replayAll(steps: List<TraceStep>): Outcome {
+        val notes = ArrayList<String>()
+        val reason = replay(steps, notes)
+        return if (reason == null) Outcome(-1, null, notes)
+        else Outcome(notes.size, reason, notes)
+    }
+
     /** @return null on full success, else a human-readable abort reason. */
-    suspend fun replay(steps: List<TraceStep>): String? {
+    suspend fun replay(steps: List<TraceStep>, executedNotes: MutableList<String>? = null): String? {
         for ((i, step) in steps.withIndex()) {
             if (actuator.cancelled()) return "cancelled"
             val ok: Boolean = if (step.needsTarget) {
@@ -43,6 +60,14 @@ class ExperienceReplayer(
                 }
             }
             if (!ok) return "step ${i + 1}: ${step.action} failed"
+            executedNotes?.add(
+                buildString {
+                    append(step.action)
+                    step.arg?.let { append(" \"$it\"") }
+                    val target = step.targetText ?: step.targetDesc ?: step.targetResId
+                    target?.let { append(" on \"$it\"") }
+                },
+            )
             // App launches settle longer (cold starts) so the next locate sees the new screen.
             delay(if (step.action == "launch_app") settleMs * 2 else settleMs)
         }

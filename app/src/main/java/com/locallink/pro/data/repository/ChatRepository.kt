@@ -214,6 +214,41 @@ class ChatRepository @Inject constructor(
         )
     }
 
+    /**
+     * Chat-only turn (the home "New chat"/"Voice chat" modes): no planner, no device control —
+     * a plain conversational reply with recent history as context. Fast and a11y-independent.
+     */
+    suspend fun runChatOnly(task: String) {
+        val now = System.currentTimeMillis()
+        val sessionId = ensureSession(task, now)
+        messageDao.insert(MessageEntity(sessionId = sessionId, role = "user", text = task, timestamp = now))
+        touchSession(sessionId)
+        _isAiResponding.value = true
+        try {
+            val history = messageDao.getMessages(sessionId)
+                .filter { it.role == "user" || it.role == "assistant" }
+                .dropLast(1) // the task itself goes as the final user message
+                .map { it.role to it.text }
+            val reply = openRouter.plainChat(task, history)
+            if (reply.isNotBlank()) {
+                messageDao.insert(MessageEntity(
+                    sessionId = sessionId, role = "assistant", text = reply,
+                    timestamp = System.currentTimeMillis(),
+                ))
+                _lastAssistantReply.value = reply
+            } else {
+                messageDao.insert(MessageEntity(
+                    sessionId = sessionId, role = "system",
+                    text = "Error: no reply — check the OpenRouter key in Settings.",
+                    timestamp = System.currentTimeMillis(),
+                ))
+            }
+        } finally {
+            _isAiResponding.value = false
+            touchSession(sessionId)
+        }
+    }
+
     /** Planning-agent entry: plan → route todos to chat/composio/pilot → execute, with input pauses. */
     suspend fun runAgent(task: String) {
         val now = System.currentTimeMillis()
@@ -253,6 +288,31 @@ class ChatRepository @Inject constructor(
         if (!com.locallink.pro.service.pilot.PilotProjectionHolder.isReady) {
             com.locallink.pro.service.pilot.PilotProjectionRequest.request()
         }
+
+        // FAST PATH: a learned routine (exact or template) matches the task → skip the
+        // planner entirely and replay it. This is what makes repeat tasks near-instant.
+        val learned = runCatching { experiences.find(task) }.getOrNull()
+        if (learned != null && learned.steps.isNotEmpty()) {
+            val fastAsk: suspend (String) -> String? = { q ->
+                val a = service.requestInput(q, null)
+                if (!a.isNullOrBlank()) {
+                    messageDao.insert(MessageEntity(
+                        sessionId = sessionId, role = "user", text = a,
+                        timestamp = System.currentTimeMillis(),
+                    ))
+                    touchSession(sessionId)
+                }
+                a
+            }
+            noteIfQueued(sessionId, task)
+            service.runPilotFlow(
+                flow = serialized(task, memoryPilot(service.asActuator(), askUser = fastAsk).run(task)),
+                onEvent = { persistPilotEvent(sessionId, it) },
+                onComplete = { _ -> _isAiResponding.value = false; touchSession(sessionId) },
+            )
+            return
+        }
+
         val runner = object : com.locallink.pro.service.pilot.ChannelRunner {
             override suspend fun chat(todo: String): String =
                 openRouter.plainChat(todo)  // tool-free plain reply (no Composio machinery)

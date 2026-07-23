@@ -96,6 +96,32 @@ class MemoryPilotTest {
         assertTrue(historySeen!!.any { it.contains("Lo-fi beats") })
     }
 
+    @Test fun partialReplayPrimesTheReasonerAndContinues() = runTest {
+        // Screen has the search box but NOT the old song result — replay does step 1, fails at 2.
+        val actuator = FakeActuator(listOf(el(0, resId = "yt:id/search")))
+        var historySeen: List<String>? = null
+        val pilot = MemoryPilot(
+            reasoner = { _, _, _, history ->
+                historySeen = history.toList()
+                "done" to """{"result":"picked the new song"}"""
+            },
+            actuator = actuator,
+            find = { SavedExperience(3L, listOf(
+                TraceStep("tap", targetResId = "yt:id/search"),
+                TraceStep("tap", targetText = "Old Song That Is Gone"),
+            ), 2) },
+            save = { _, _ -> },
+            bump = { },
+        )
+        val events = pilot.run("play new song on youtube").toList()
+        assertEquals("picked the new song", (events.last() as AgentEvent.Final).text)
+        // The deterministic prefix ran…
+        assertEquals(listOf("tap:0"), actuator.driven)
+        // …and the reasoner started PRIMED with what was already done.
+        assertTrue(historySeen!!.any { it.contains("replayed learned step") })
+        assertTrue(historySeen!!.any { it.contains("continue the task") })
+    }
+
     @Test fun learnsTraceFromFreshRunAndSavesIt() = runTest {
         val actuator = FakeActuator(listOf(el(0, text = "Wi-Fi", resId = "settings:id/wifi")))
         var saved: List<TraceStep>? = null

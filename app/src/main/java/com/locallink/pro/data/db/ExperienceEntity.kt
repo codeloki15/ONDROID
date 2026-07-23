@@ -16,12 +16,14 @@ import androidx.room.Query
 @Entity(tableName = "experiences", indices = [Index(value = ["taskNorm"], unique = true)])
 data class ExperienceEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val taskNorm: String,       // normalized task text (match key)
+    val taskNorm: String,       // normalized task text (match key); "tpl <residual>" for templates
     val taskRaw: String,        // original phrasing (display)
-    val stepsJson: String,      // serialized List<TraceStep>
+    val stepsJson: String,      // serialized List<TraceStep> ({q}-slotted when template)
     val successCount: Int = 1,  // how many times this routine has worked
     val createdAt: Long,
     val updatedAt: Long,
+    /** Space-joined residual tokens of a parameterized template; "" = exact routine. */
+    val slotResidual: String = "",
 )
 
 @Dao

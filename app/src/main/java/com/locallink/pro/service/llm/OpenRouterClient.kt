@@ -311,14 +311,20 @@ class OpenRouterClient @Inject constructor(
      * agent's "chat" channel so a simple question ("what is 7×8") returns clean text instead of
      * going through the tool-calling machinery. Returns "" on any failure.
      */
-    suspend fun plainChat(prompt: String): String = withContext(Dispatchers.IO) {
+    suspend fun plainChat(
+        prompt: String,
+        history: List<Pair<String, String>> = emptyList(), // (role "user"/"assistant", text)
+    ): String = withContext(Dispatchers.IO) {
         val key = settings.loadOpenRouterApiKey()
         if (key.isBlank()) return@withContext ""
         val model = settings.loadOpenRouterModel()
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content",
                 "You are Omni, a concise, helpful assistant. Answer directly."))
-            .put(JSONObject().put("role", "user").put("content", prompt))
+        history.takeLast(12).forEach { (role, text) ->
+            if (text.isNotBlank()) messages.put(JSONObject().put("role", role).put("content", text))
+        }
+        messages.put(JSONObject().put("role", "user").put("content", prompt))
         val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.6)
         runCatching { postChat(key, body).optString("content") }.getOrDefault("")
     }

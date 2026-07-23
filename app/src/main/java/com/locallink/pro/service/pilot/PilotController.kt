@@ -49,9 +49,11 @@ class PilotController(
      * (input floater) and resumes with the answer. Null → an ask ends the run (legacy).
      */
     private val askUser: (suspend (String) -> String?)? = null,
+    /** Notes injected at the start of history — e.g. a partially replayed routine's steps. */
+    private val primedHistory: List<String> = emptyList(),
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
-        val history = ArrayList<String>()
+        val history = ArrayList<String>(primedHistory)
         val trace = ArrayList<TraceStep>()
         var traceBroken = false  // an untraceable step ran → replaying the rest would diverge
         var lastActionSig: String? = null

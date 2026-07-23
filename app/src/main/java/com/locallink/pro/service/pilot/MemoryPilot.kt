@@ -29,6 +29,7 @@ class MemoryPilot(
     private val askUser: (suspend (String) -> String?)? = null,
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
+        var primed: List<String> = emptyList()
         val exp = runCatching { find(task) }.getOrNull()
         if (exp != null && exp.steps.isNotEmpty()) {
             val id = UUID.randomUUID().toString()
@@ -36,14 +37,25 @@ class MemoryPilot(
                 id, "replay_routine",
                 "{\"steps\":${exp.steps.size},\"learned_from\":${exp.successCount}}", true,
             ))
-            val abort = ExperienceReplayer(actuator).replay(exp.steps)
-            if (abort == null) {
+            val outcome = ExperienceReplayer(actuator).replayAll(exp.steps)
+            if (outcome.fullSuccess) {
                 runCatching { bump(exp.id) }
                 emit(AgentEvent.ToolResult(id, "replay_routine", "replayed ${exp.steps.size} learned steps", true))
                 emit(AgentEvent.Final("Done — replayed a routine I learned earlier (no guessing)."))
                 return@flow
             }
-            emit(AgentEvent.ToolResult(id, "replay_routine", "screen diverged ($abort) — reasoning instead", false))
+            if (outcome.executedNotes.isNotEmpty()) {
+                // Partial replay: keep the deterministic prefix, let the model finish the tail.
+                emit(AgentEvent.ToolResult(
+                    id, "replay_routine",
+                    "replayed ${outcome.executedNotes.size}/${exp.steps.size} learned steps, then " +
+                        "${outcome.reason} — continuing with reasoning", true,
+                ))
+                primed = outcome.executedNotes.map { "replayed learned step: $it" } +
+                    "the learned routine diverged here (${outcome.reason}) — continue the task from the CURRENT screen"
+            } else {
+                emit(AgentEvent.ToolResult(id, "replay_routine", "screen diverged (${outcome.reason}) — reasoning instead", false))
+            }
         }
         emitAll(
             PilotController(
@@ -52,6 +64,7 @@ class MemoryPilot(
                 screenshot = screenshot,
                 onTrace = { steps -> runCatching { save(task, steps) } },
                 askUser = askUser,
+                primedHistory = primed,
             ).run(task),
         )
     }.flowOn(Dispatchers.IO)

@@ -49,6 +49,46 @@ class ExperienceTest {
         assertFalse(TraceStep("back").needsTarget)
     }
 
+    // ─── Routine templates (parameterized experiences) ───────────────────
+
+    private val youtubeSteps = listOf(
+        TraceStep("launch_app", "youtube"),
+        TraceStep("tap", targetResId = "yt:id/search"),
+        TraceStep("type", arg = "Believer Imagine Dragons", targetResId = "yt:id/query"),
+        TraceStep("tap", targetText = "Believer - Imagine Dragons"),
+    )
+
+    @Test fun generalizeSlotsTheTypedQueryAndKeepsTheShape() {
+        val t = ExperienceTemplates.generalize("Play Believer by Imagine Dragons on YouTube", youtubeSteps)!!
+        assertEquals(ExperienceTemplates.SLOT, t.steps[2].arg)
+        assertTrue("shape keeps the fixed words", t.residualTokens.containsAll(listOf("play", "youtube")))
+        assertFalse("slot words leave the shape", t.residualTokens.contains("believer"))
+    }
+
+    @Test fun unifyFillsTheSlotFromADifferentSong() {
+        val t = ExperienceTemplates.generalize("Play Believer by Imagine Dragons on YouTube", youtubeSteps)!!
+        val q = ExperienceTemplates.unify(t.residualTokens, "Play Shape of You by Ed Sheeran on YouTube")
+        assertEquals("shape of you ed sheeran", q)
+        assertNull("different shape must not match",
+            ExperienceTemplates.unify(t.residualTokens, "Send an email to Bob"))
+    }
+
+    @Test fun instantiateSubstitutesTheSlot() {
+        val t = ExperienceTemplates.generalize("Play Believer by Imagine Dragons on YouTube", youtubeSteps)!!
+        val steps = ExperienceTemplates.instantiate(t.steps, "shape of you")
+        assertEquals("shape of you", steps[2].arg)
+    }
+
+    @Test fun nonParameterizedTraceDoesNotGeneralize() {
+        val steps = listOf(TraceStep("launch_app", "settings"), TraceStep("tap", targetText = "Battery"))
+        assertNull(ExperienceTemplates.generalize("Open battery settings", steps))
+    }
+
+    @Test fun baseKeyStripsRunSpecificSuffixes() {
+        assertEquals("Play music", ExperienceTemplates.baseKey("Play music\n[Progress so far: found x]"))
+        assertEquals("Delete apps", ExperienceTemplates.baseKey("Delete apps [user said: yes]"))
+    }
+
     // ─── Locator fallback chain ──────────────────────────────────────────
 
     private fun el(id: Int, text: String? = null, desc: String? = null, resId: String? = null, cls: String? = null) =

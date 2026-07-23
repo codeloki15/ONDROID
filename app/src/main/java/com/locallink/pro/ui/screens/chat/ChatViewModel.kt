@@ -67,6 +67,11 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // Entry mode from the home cards: "chat" = plain conversation, "voice" = chat + voice UX,
+    // "auto" = full agent (planner + device control). History opens default to "auto".
+    private var mode: String = "auto"
+    fun setMode(m: String) { mode = m }
+
     fun openSession(id: String?) {
         if (id == null) chatRepository.newSession() else chatRepository.loadSession(id)
     }
@@ -89,14 +94,16 @@ class ChatViewModel @Inject constructor(
             return
         }
 
-        // Default: route every message through the planning agent (no prefix). It decides
-        // chat / composio / pilot per todo. Image messages still use the plain chat send.
+        // Route by entry mode: chat/voice = plain conversation (fast, no device control);
+        // auto = the planning agent. Image messages still use the legacy multimodal send.
         viewModelScope.launch {
-            if (imageUri == null) {
-                chatRepository.runAgent(messageText)
-            } else {
-                val bitmap: Bitmap? = imageService.loadForInference(imageUri)
-                chatRepository.send(text = messageText, image = bitmap, imageUri = imageUri.toString(), isVoice = isVoice)
+            when {
+                imageUri != null -> {
+                    val bitmap: Bitmap? = imageService.loadForInference(imageUri)
+                    chatRepository.send(text = messageText, image = bitmap, imageUri = imageUri.toString(), isVoice = isVoice)
+                }
+                mode == "chat" || mode == "voice" -> chatRepository.runChatOnly(messageText)
+                else -> chatRepository.runAgent(messageText)
             }
         }
     }

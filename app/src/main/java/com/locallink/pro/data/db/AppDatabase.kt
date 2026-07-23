@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class, ExperienceEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,6 +35,13 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE UNIQUE INDEX IF NOT EXISTS `index_experiences_taskNorm` ON `experiences` (`taskNorm`)",
                 )
+            }
+        }
+
+        /** v2 → v3: parameterized routine templates ({q}-slotted traces). */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `experiences` ADD COLUMN `slotResidual` TEXT NOT NULL DEFAULT ''")
             }
         }
     }
