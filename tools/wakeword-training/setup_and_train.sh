@@ -16,9 +16,11 @@ source venv/bin/activate
 python -c "import openwakeword" 2>/dev/null || {
   log "installing python deps (openwakeword, torch, piper deps)"
   pip -q install --upgrade pip
+  # datasets pinned <4: newer versions delegate audio decode to torchcodec (needs
+  # system FFmpeg); 3.x decodes via soundfile, which fetch_audio.py relies on.
   pip -q install openwakeword torch torchaudio onnx onnxruntime piper-phonemize-cross \
       soundfile scipy tqdm requests pyyaml mutagen torchinfo torchmetrics speechbrain \
-      audiomentations torch-audiomentations acoustics pronouncing datasets deep-phonemizer
+      audiomentations torch-audiomentations acoustics pronouncing "datasets==3.6.0" deep-phonemizer
 }
 
 # ── Stage 2: piper sample generator (synthetic positives) ───────────────
@@ -90,63 +92,25 @@ log "sample generation complete"
 # Reverb + noise mixing is what makes a synthetic-TTS-trained model survive a real
 # phone mic across the room. RIRs: MIT environmental impulse responses. Backgrounds:
 # AudioSet clips + FMA music, streamed via HF datasets and saved as 16 kHz wavs.
+# fetch_audio.py streams via Audio(decode=False) + soundfile — datasets>=4 would
+# otherwise require torchcodec (and system FFmpeg) for its own audio decoding.
 if [ ! -f mit_rirs/.done ]; then
   log "downloading MIT RIRs"
-  mkdir -p mit_rirs
-  python - <<'EOF'
-import os, numpy as np, scipy.io.wavfile
-from datasets import load_dataset, Audio
-ds = load_dataset("davidscripka/MIT_environmental_impulse_responses", split="train", streaming=True)
-ds = ds.cast_column("audio", Audio(sampling_rate=16000))
-n = 0
-for row in ds:
-    a = row["audio"]
-    name = os.path.basename(a.get("path") or f"rir_{n}.wav")
-    scipy.io.wavfile.write(os.path.join("mit_rirs", name), 16000,
-                           (np.asarray(a["array"]) * 32767).astype(np.int16))
-    n += 1
-print("RIRs saved:", n)
-EOF
+  python fetch_audio.py davidscripka/MIT_environmental_impulse_responses train mit_rirs rir 100000
   touch mit_rirs/.done
 fi
 
 if [ ! -f audioset_16k/.done ]; then
   log "streaming AudioSet background clips (1500)"
-  mkdir -p audioset_16k
-  python - <<'EOF' || echo "[warn] audioset stream failed — continuing without it"
-import os, numpy as np, scipy.io.wavfile
-from datasets import load_dataset, Audio
-ds = load_dataset("agkphysics/AudioSet", split="train", streaming=True)
-ds = ds.cast_column("audio", Audio(sampling_rate=16000))
-n = 0
-for row in ds:
-    a = row["audio"]
-    scipy.io.wavfile.write(os.path.join("audioset_16k", f"as_{n}.wav"), 16000,
-                           (np.asarray(a["array"]) * 32767).astype(np.int16))
-    n += 1
-    if n >= 1500: break
-print("AudioSet clips saved:", n)
-EOF
+  python fetch_audio.py agkphysics/AudioSet train audioset_16k as 1500 \
+    || echo "[warn] audioset stream failed — continuing without it"
   touch audioset_16k/.done
 fi
 
 if [ ! -f fma_16k/.done ]; then
   log "streaming FMA music clips (700)"
-  mkdir -p fma_16k
-  python - <<'EOF' || echo "[warn] fma stream failed — continuing without it"
-import os, numpy as np, scipy.io.wavfile
-from datasets import load_dataset, Audio
-ds = load_dataset("rudraml/fma", name="small", split="train", streaming=True)
-ds = ds.cast_column("audio", Audio(sampling_rate=16000))
-n = 0
-for row in ds:
-    a = row["audio"]
-    scipy.io.wavfile.write(os.path.join("fma_16k", f"fma_{n}.wav"), 16000,
-                           (np.asarray(a["array"]) * 32767).astype(np.int16))
-    n += 1
-    if n >= 700: break
-print("FMA clips saved:", n)
-EOF
+  python fetch_audio.py rudraml/fma train fma_16k fma 700 small \
+    || echo "[warn] fma stream failed — continuing without it"
   touch fma_16k/.done
 fi
 
