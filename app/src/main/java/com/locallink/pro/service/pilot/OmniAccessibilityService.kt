@@ -268,7 +268,10 @@ class OmniAccessibilityService : AccessibilityService() {
             override fun onCompleted(d: GestureDescription?) { done.complete(true) }
             override fun onCancelled(d: GestureDescription?) { done.complete(false) }
         }, null)
-        return if (!ok) false else done.await()
+        // Android sometimes never fires the callback (window changes mid-gesture) — an
+        // unbounded await() zombied a whole run once. Time out and report failure instead.
+        return if (!ok) false
+        else kotlinx.coroutines.withTimeoutOrNull(durationMs + 5_000L) { done.await() } ?: false
     }
 
     /** Find the live AccessibilityNodeInfo whose bounds match a perceived element (for typing). */
