@@ -15,6 +15,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -29,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import coil.compose.AsyncImage
 import com.locallink.pro.service.llm.ComposioApp
+import com.locallink.pro.ui.components.GradientPill
 import com.locallink.pro.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,7 +65,7 @@ fun ConnectScreen(
         containerColor = OmniBg,
         topBar = {
             TopAppBar(
-                title = { Text("Connected Apps") },
+                title = { Text("Composio") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = OmniText)
@@ -73,8 +78,27 @@ fun ConnectScreen(
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
+            // ── Account (BYO Composio API key) ───────────────────────────
+            // First run shows the full setup card; once a key is saved it collapses to a
+            // one-line status row with an Edit toggle. Tools reached here power the CHAT and
+            // VOICE modes only — "Automate my phone" never routes through Composio.
+            var showSetup by remember { mutableStateOf(false) }
+            if (!ui.hasKey || showSetup) {
+                SetupCard(
+                    apiKey = ui.apiKey,
+                    userId = ui.userId,
+                    onApiKey = vm::setApiKey,
+                    onUserId = vm::setUserId,
+                    onSave = { showSetup = false; vm.saveAndLoad() },
+                )
+            } else {
+                KeyStatusRow(userId = ui.userId, onEdit = { showSetup = true })
+            }
             if (!ui.hasKey) {
-                EmptyHint("Add your Composio API key in Settings → Connected Apps to browse and connect apps.")
+                ui.error?.let {
+                    Text(it, color = OmniError, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+                }
                 return@Column
             }
 
@@ -213,9 +237,101 @@ private fun AppCard(
     }
 }
 
+/** First-run setup: paste the BYO Composio API key (and optional user id), then load the grid. */
 @Composable
-private fun EmptyHint(text: String) {
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = OmniTextDim, style = MaterialTheme.typography.bodyMedium)
+private fun SetupCard(
+    apiKey: String,
+    userId: String,
+    onApiKey: (String) -> Unit,
+    onUserId: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(OmniSurface)
+            .border(1.dp, OmniBorder, RoundedCornerShape(20.dp))
+            .padding(18.dp),
+    ) {
+        Text("Set up Composio", color = OmniText, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Composio powers cloud app tools — Gmail, Slack, Calendar and hundreds more — in " +
+                "chat and voice chat. Bring your own (free) API key.",
+            color = OmniTextDim, style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(14.dp))
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = onApiKey,
+            label = { Text("Composio API key") },
+            placeholder = { Text("ak_…", color = OmniTextFaint) },
+            leadingIcon = { Icon(Icons.Outlined.Key, null, tint = OmniTextFaint, modifier = Modifier.size(18.dp)) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            shape = RoundedCornerShape(14.dp),
+            colors = setupFieldColors(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = userId,
+            onValueChange = onUserId,
+            label = { Text("User id") },
+            placeholder = { Text("default", color = OmniTextFaint) },
+            supportingText = { Text("Connections are stored under this id — leave as \"default\".", color = OmniTextFaint) },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = setupFieldColors(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { runCatching { uriHandler.openUri("https://app.composio.dev") } }
+                .padding(top = 10.dp, bottom = 4.dp, start = 2.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.OpenInNew, null, modifier = Modifier.size(14.dp), tint = OmniAccent)
+            Spacer(Modifier.width(6.dp))
+            Text("Get a key at app.composio.dev", style = MaterialTheme.typography.labelMedium, color = OmniAccent)
+        }
+        Spacer(Modifier.height(12.dp))
+        GradientPill(
+            "Save & load apps",
+            onClick = onSave,
+            enabled = apiKey.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
+
+/** Collapsed account state once a key is saved: green dot + user id + Edit toggle. */
+@Composable
+private fun KeyStatusRow(userId: String, onEdit: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(OmniSuccess))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "API key set · user \"$userId\"",
+            color = OmniTextDim, style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onEdit) { Text("Edit", color = OmniAccent) }
+    }
+}
+
+@Composable
+private fun setupFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = OmniBorderFocus, unfocusedBorderColor = OmniBorder,
+    focusedContainerColor = OmniSurface2, unfocusedContainerColor = OmniSurface2,
+    focusedTextColor = OmniText, unfocusedTextColor = OmniText,
+    focusedLabelColor = OmniAccent, unfocusedLabelColor = OmniTextFaint,
+    cursorColor = OmniAccent,
+)

@@ -12,7 +12,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -229,6 +231,32 @@ fun SettingsScreen(
                         color = OmniTextFaint,
                         modifier = Modifier.padding(top = 8.dp)
                     )
+                }
+
+                // ── Connected apps (Composio — powers chat & voice tools) ─
+                SettingsSection(title = "Connected apps") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClick = onManageApps)
+                            .padding(vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconBadge(Icons.Outlined.Apps)
+                        Spacer(Modifier.width(13.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Composio apps", style = MaterialTheme.typography.titleSmall, color = OmniText)
+                            Text(
+                                "Add your key, connect Gmail, Slack & more — used by chat and voice",
+                                style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null,
+                            tint = OmniTextFaint, modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
 
                 // ── Memory ───────────────────────────────────────────────

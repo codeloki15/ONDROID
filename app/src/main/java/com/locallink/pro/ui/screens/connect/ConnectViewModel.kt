@@ -16,6 +16,10 @@ import javax.inject.Inject
 
 data class ConnectUiState(
     val hasKey: Boolean = false,
+    /** The BYO Composio API key as typed (mirrors DataStore; edited on this screen). */
+    val apiKey: String = "",
+    /** Composio user id the connections are keyed by (default "default"). */
+    val userId: String = "default",
     val loading: Boolean = false,
     val apps: List<ComposioApp> = emptyList(),
     val search: String = "",
@@ -39,9 +43,34 @@ class ConnectViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val hasKey = settings.loadComposioApiKey().isNotBlank()
-            _ui.update { it.copy(hasKey = hasKey) }
-            if (hasKey) load()
+            val key = settings.loadComposioApiKey()
+            val user = settings.loadComposioUserId()
+            _ui.update { it.copy(apiKey = key, userId = user, hasKey = key.isNotBlank()) }
+            if (key.isNotBlank()) load()
+        }
+    }
+
+    fun setApiKey(key: String) {
+        _ui.update { it.copy(apiKey = key) }
+        settings.saveComposioApiKey(key)
+    }
+
+    fun setUserId(id: String) {
+        _ui.update { it.copy(userId = id) }
+        settings.saveComposioUserId(id)
+    }
+
+    /**
+     * Called from the setup card's CTA. Key/user-id saves are fire-and-forget (async DataStore)
+     * — settle briefly so ComposioClient reads the fresh key, then flip [ConnectUiState.hasKey]
+     * and fetch the app grid.
+     */
+    fun saveAndLoad() {
+        viewModelScope.launch {
+            delay(250)
+            val has = settings.loadComposioApiKey().isNotBlank()
+            _ui.update { it.copy(hasKey = has, error = if (has) null else "Paste a Composio API key first") }
+            if (has) load()
         }
     }
 
