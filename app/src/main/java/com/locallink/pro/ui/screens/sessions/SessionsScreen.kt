@@ -52,8 +52,16 @@ fun SessionsScreen(
     vm: SessionsViewModel = hiltViewModel(),
 ) {
     val sessions by vm.sessions.collectAsState()
+    val health by vm.health.collectAsState()
     var query by remember { mutableStateOf("") }
     var showAll by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Both health signals (key set? a11y service alive?) change outside this screen.
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        vm.refreshHealth()
+        onPauseOrDispose { }
+    }
 
     val filtered = remember(sessions, query) {
         if (query.isBlank()) sessions
@@ -92,6 +100,26 @@ fun SessionsScreen(
                         color = OmniText,
                         modifier = Modifier.padding(top = 30.dp, bottom = 26.dp),
                     )
+                }
+                if (health != SetupHealth.OK) {
+                    item {
+                        SetupHealthBanner(
+                            health = health,
+                            onFix = {
+                                when (health) {
+                                    SetupHealth.NO_AI_KEY -> onOpenSettings()
+                                    SetupHealth.A11Y_OFF -> runCatching {
+                                        context.startActivity(
+                                            android.content.Intent(
+                                                android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS
+                                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        )
+                                    }
+                                    else -> {}
+                                }
+                            },
+                        )
+                    }
                 }
                 item {
                     SearchPill(
@@ -278,5 +306,52 @@ private fun relativeTime(ts: Long): String {
         m < 60 * 24 -> "${m / 60}h ago"
         m < 60 * 24 * 7 -> "${m / (60 * 24)}d ago"
         else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.US).format(java.util.Date(ts))
+    }
+}
+
+/**
+ * One-line actionable setup warning with a Fix button — shown when the AI key is
+ * missing or the accessibility service got disabled (every reinstall on ColorOS).
+ */
+@Composable
+private fun SetupHealthBanner(health: SetupHealth, onFix: () -> Unit) {
+    val (title, sub, cta) = when (health) {
+        SetupHealth.NO_AI_KEY -> Triple(
+            "Add your AI key",
+            "OmniPro needs an OpenRouter key to think. Takes a minute.",
+            "Set up",
+        )
+        SetupHealth.A11Y_OFF -> Triple(
+            "Automate is switched off",
+            "Android disabled the OmniPro accessibility service. Turn it back on to let Omni drive your phone.",
+            "Turn on",
+        )
+        else -> return
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(PastelLavender.copy(alpha = 0.55f))
+            .border(1.dp, AuroraViolet.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+            .clickable(onClick = onFix)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = OmniText)
+            Text(sub, style = MaterialTheme.typography.bodySmall, color = OmniTextDim)
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            cta,
+            style = MaterialTheme.typography.labelLarge,
+            color = Color.White,
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(InkPill)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
     }
 }

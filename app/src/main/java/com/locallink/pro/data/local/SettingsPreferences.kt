@@ -52,6 +52,9 @@ class SettingsPreferences(private val context: Context) {
         // Hands-free (wake-word) mode
         private val KEY_HANDS_FREE = booleanPreferencesKey("hands_free_enabled")
 
+        // First-run onboarding wizard completed (or explicitly skipped)
+        private val KEY_ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
+
         // LLM engine mode (cloud / local routing)
         private val KEY_ENGINE_MODE = stringPreferencesKey("engine_mode")
 
@@ -124,6 +127,11 @@ class SettingsPreferences(private val context: Context) {
     val handsFree: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_HANDS_FREE] ?: false }
     suspend fun loadHandsFree(): Boolean = handsFree.first()
     fun setHandsFree(enabled: Boolean) = editAsync { it[KEY_HANDS_FREE] = enabled }
+
+    // First-run onboarding
+    val onboardingDone: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_ONBOARDING_DONE] ?: false }
+    suspend fun loadOnboardingDone(): Boolean = onboardingDone.first()
+    fun setOnboardingDone(done: Boolean) = editAsync { it[KEY_ONBOARDING_DONE] = done }
 
     // On-device STT (parakeet). Default ON — used automatically once the model is downloaded.
     val sttOnDevice: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_STT_ON_DEVICE] ?: true }

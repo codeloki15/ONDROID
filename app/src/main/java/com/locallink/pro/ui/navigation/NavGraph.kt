@@ -6,14 +6,20 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.locallink.pro.ui.screens.chat.ChatScreen
 import com.locallink.pro.ui.screens.connect.ConnectScreen
 import com.locallink.pro.ui.screens.model.ModelGateScreen
+import com.locallink.pro.ui.screens.onboarding.OnboardingScreen
+import com.locallink.pro.ui.screens.onboarding.OnboardingViewModel
 import com.locallink.pro.ui.screens.sessions.SessionsScreen
 import com.locallink.pro.ui.screens.settings.SettingsScreen
 
 object Routes {
     const val GATE = "gate"
+    const val ONBOARDING = "onboarding"
     const val SESSIONS = "sessions"
     const val CHAT = "chat"            // chat?sessionId={id}&voice={bool}
     const val SETTINGS = "settings"
@@ -24,9 +30,20 @@ object Routes {
 fun LocalLinkNavGraph(navController: NavHostController) {
     NavHost(navController = navController, startDestination = Routes.GATE) {
         composable(Routes.GATE) {
+            // First run goes through the setup wizard; afterwards straight to home.
+            val obVm: OnboardingViewModel = hiltViewModel()
+            val onboarded by obVm.done.collectAsState()
             ModelGateScreen(onReady = {
-                navController.navigate(Routes.SESSIONS) {
+                val target = if (onboarded == true) Routes.SESSIONS else Routes.ONBOARDING
+                navController.navigate(target) {
                     popUpTo(Routes.GATE) { inclusive = true }
+                }
+            })
+        }
+        composable(Routes.ONBOARDING) {
+            OnboardingScreen(onDone = {
+                navController.navigate(Routes.SESSIONS) {
+                    popUpTo(Routes.ONBOARDING) { inclusive = true }
                 }
             })
         }
