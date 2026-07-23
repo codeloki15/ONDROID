@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.LocalLinkPro" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#090607</item>
-        <item name="android:colorBackground">#090607</item>
+    <style name="Theme.LocalLinkPro" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F7F5F3</item>
+        <item name="android:colorBackground">#F7F5F3</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
         <item name="android:enforceNavigationBarContrast">false</item>
-        <item name="android:windowSplashScreenBackground">#090607</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">#221F20</item>
+        <item name="android:windowSplashScreenBackground">#F7F5F3</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#EBDDFB</item>
     </style>
 </resources>

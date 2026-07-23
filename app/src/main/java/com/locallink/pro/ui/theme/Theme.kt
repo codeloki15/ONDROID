@@ -29,9 +29,9 @@ data class OmniPinColors(
 
 val LocalOmniPinColors = staticCompositionLocalOf { OmniPinColors() }
 
-// ─── Aurora Ink Material color scheme ────────────────────────────────────
+// ─── Porcelain Material color scheme (light) ─────────────────────────────
 
-private val AuroraScheme = darkColorScheme(
+private val AuroraScheme = androidx.compose.material3.lightColorScheme(
     primary = OmniAccent,
     onPrimary = OmniTextOnAccent,
     primaryContainer = OmniAccentContainer,
@@ -46,10 +46,10 @@ private val AuroraScheme = darkColorScheme(
     onBackground = OmniText,
     surface = OmniBg,
     onSurface = OmniText,
-    surfaceVariant = OmniSurface,
+    surfaceVariant = OmniSurface2,
     onSurfaceVariant = OmniTextDim,
     surfaceContainer = OmniSurface,
-    surfaceContainerLow = Color(0xFF1A1718),
+    surfaceContainerLow = Color(0xFFFBFAF9),
     surfaceContainerHigh = OmniSurface2,
     surfaceContainerHighest = OmniSurface3,
     outline = OmniBorder,
@@ -61,11 +61,11 @@ private val AuroraScheme = darkColorScheme(
     scrim = OmniScrim,
 )
 
-// ─── Theme (always dark Aurora Ink) ──────────────────────────────────────
+// ─── Theme (Porcelain — always light) ────────────────────────────────────
 
 @Composable
 fun LocalLinkProTheme(
-    darkTheme: Boolean = true,        // OmniPro is dark-themed
+    darkTheme: Boolean = false,       // Porcelain is light-themed
     dynamicColor: Boolean = false,    // keep our identity, ignore Material You
     content: @Composable () -> Unit
 ) {

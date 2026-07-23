@@ -316,7 +316,7 @@ private fun AiBubble(
             MarkdownText(text = text, trailingCursor = streaming)
             if (!streaming) {
                 HorizontalDivider(
-                    color = Color.White.copy(alpha = 0.08f),
+                    color = OmniText.copy(alpha = 0.08f),
                     modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -368,7 +368,7 @@ private fun UserBubble(msg: Message, onEdit: (String) -> Unit) {
                     if (msg.text.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
                 if (msg.text.isNotBlank()) {
-                    Text(msg.text, color = Color.White, style = MaterialTheme.typography.bodyLarge)
+                    Text(msg.text, color = OmniTextOnBubble, style = MaterialTheme.typography.bodyLarge)
                 }
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -428,7 +428,7 @@ private fun PlanCard(body: String) {
                 .widthIn(max = 320.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .background(GlassFillFaint)
-                .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(20.dp))
+                .border(1.dp, OmniText.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
                 .padding(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -717,7 +717,7 @@ private fun EmptyChat(modifier: Modifier = Modifier, onPrompt: (String) -> Unit)
                         Modifier
                             .padding(vertical = 5.dp)
                             .clip(RoundedCornerShape(18.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(18.dp))
+                            .border(1.dp, OmniText.copy(alpha = 0.14f), RoundedCornerShape(18.dp))
                             .clickable { onPrompt(ex) }
                             .padding(horizontal = 18.dp, vertical = 12.dp),
                     ) {

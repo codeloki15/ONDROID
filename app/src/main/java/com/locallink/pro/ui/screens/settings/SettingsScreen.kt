@@ -441,6 +441,7 @@ private fun SettingsSlider(
                         .size(20.dp)
                         .clip(CircleShape)
                         .background(Color.White)
+                        .border(1.dp, GlassBorder, CircleShape)
                 )
             },
             colors = SliderDefaults.colors(

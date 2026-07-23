@@ -74,8 +74,8 @@ fun SessionsScreen(
                         Spacer(Modifier.weight(1f))
                         Box(
                             Modifier.size(42.dp).clip(CircleShape)
-                                .background(OmniBg.copy(alpha = 0.35f))
-                                .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+                                .background(OmniSurface.copy(alpha = 0.65f))
+                                .border(1.dp, OmniText.copy(alpha = 0.15f), CircleShape)
                                 .clickable(onClick = onOpenSettings),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -175,7 +175,7 @@ private fun ActionCard(title: String, onClick: () -> Unit) {
         Modifier
             .size(width = 140.dp, height = 146.dp)
             .clip(RoundedCornerShape(26.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(26.dp))
+            .border(1.dp, OmniText.copy(alpha = 0.16f), RoundedCornerShape(26.dp))
             .clickable(onClick = onClick)
             .padding(18.dp),
     ) {

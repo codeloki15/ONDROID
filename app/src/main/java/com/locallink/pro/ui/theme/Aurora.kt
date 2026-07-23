@@ -11,12 +11,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 /**
- * Ambient backdrop for the "Aurora Ink" theme: near-black ink lit from the top
- * by a violet→rose bloom, fading out by ~40% of the screen height. Static
- * (no per-frame animation) so it is cheap to draw.
+ * Ambient backdrop for the "Porcelain" theme: warm off-white lit from the top by
+ * soft pastel blooms (lavender, peach, a hint of mint) that settle back into the
+ * base within the header zone. Static — cheap to draw.
  *
- * [glow] scales the bloom's intensity: 1f = editorial home-screen header,
- * 0.25f = whisper for chat/settings, 0f = pure ink.
+ * [glow] scales the wash: 1f = editorial home header, ~0.3f = whisper for inner
+ * screens, 0f = plain porcelain.
  */
 @Composable
 fun AuroraBackground(
@@ -33,43 +33,36 @@ fun AuroraBackground(
                 val w = size.width
                 val h = size.height
 
-                // Deep violet wash across the whole header zone.
+                // Lavender bloom, top-left.
                 drawRect(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF8A16AE).copy(alpha = 0.42f * glow), Color.Transparent),
-                        center = Offset(w * 0.42f, -h * 0.05f),
-                        radius = maxOf(w, h) * 0.75f,
+                        colors = listOf(GlowAmber.copy(alpha = 0.55f * glow), Color.Transparent),
+                        center = Offset(w * 0.20f, h * 0.02f),
+                        radius = w * 0.80f,
                     ),
                 )
-                // Bright violet core, top-left.
+                // Peach bloom, top-right.
                 drawRect(
                     brush = Brush.radialGradient(
-                        colors = listOf(AuroraViolet.copy(alpha = 0.50f * glow), Color.Transparent),
-                        center = Offset(w * 0.18f, h * 0.02f),
-                        radius = w * 0.78f,
-                    ),
-                )
-                // Warm rose-peach bloom, top-right.
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(AuroraRose.copy(alpha = 0.46f * glow), Color.Transparent),
+                        colors = listOf(AuroraPeach.copy(alpha = 0.45f * glow), Color.Transparent),
                         center = Offset(w * 0.85f, h * 0.03f),
                         radius = w * 0.70f,
                     ),
                 )
+                // Mint hint, upper middle.
                 drawRect(
                     brush = Brush.radialGradient(
-                        colors = listOf(AuroraPeach.copy(alpha = 0.22f * glow), Color.Transparent),
-                        center = Offset(w * 0.65f, h * 0.01f),
-                        radius = w * 0.45f,
+                        colors = listOf(PastelMint.copy(alpha = 0.40f * glow), Color.Transparent),
+                        center = Offset(w * 0.55f, h * 0.08f),
+                        radius = w * 0.55f,
                     ),
                 )
-                // Settle everything back into ink below the header.
+                // Settle back into porcelain below the header.
                 drawRect(
                     brush = Brush.verticalGradient(
                         0.0f to Color.Transparent,
-                        0.13f to OmniBg.copy(alpha = 0.30f),
-                        0.34f to OmniBg,
+                        0.14f to OmniBg.copy(alpha = 0.35f),
+                        0.36f to OmniBg,
                         startY = 0f, endY = h,
                     ),
                 )

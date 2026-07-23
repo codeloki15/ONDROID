@@ -48,7 +48,7 @@ private fun Modifier.pressScale(pressed: Boolean): Modifier = graphicsLayer {
     scaleX = s; scaleY = s
 }
 
-/** Filled violet→pink gradient pill — the primary action. */
+/** Filled ink pill — the primary CTA (black pill per the Porcelain reference). */
 @Composable
 fun GradientPill(
     text: String,
@@ -66,7 +66,7 @@ fun GradientPill(
             .graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (enabled) 1f else 0.45f }
             .height(height)
             .clip(RoundedCornerShape(height / 2))
-            .background(AuroraBrush)
+            .background(com.locallink.pro.ui.theme.InkPill)
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
             .padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
