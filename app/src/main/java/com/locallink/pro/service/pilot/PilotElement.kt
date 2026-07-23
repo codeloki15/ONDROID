@@ -12,6 +12,7 @@ data class PilotElement(
     val bounds: IntArray, // [left, top, right, bottom]
     val clickable: Boolean,
     val editable: Boolean,
+    val enabled: Boolean = true,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -22,5 +23,6 @@ data class PilotElement(
         put("bounds", JSONArray(listOf(bounds[0], bounds[1], bounds[2], bounds[3])))
         if (clickable) put("clickable", true)   // omit default-false to save tokens
         if (editable) put("editable", true)
+        if (!enabled) put("disabled", true)     // tapping does nothing until it activates
     }
 }

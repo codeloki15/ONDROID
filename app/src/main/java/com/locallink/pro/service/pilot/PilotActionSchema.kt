@@ -28,6 +28,10 @@ object PilotActionSchema {
         effect. When the goal is visibly achieved, call done(result). If you are stuck or the
         screen is unexpected, call ask(question) instead of guessing.
 
+        Elements marked "disabled": true do NOT respond to taps. Something must activate them
+        first — usually scrolling the page content to the bottom (consent/onboarding screens),
+        filling a required field, or selecting an item. Do that FIRST, then tap.
+
         Self-preservation: NEVER open Accessibility settings, never tap anything named
         "OmniPro", and never uninstall/force-stop/disable OmniPro — that is you; touching it
         kills the running task. If you find yourself on an Accessibility or OmniPro screen,

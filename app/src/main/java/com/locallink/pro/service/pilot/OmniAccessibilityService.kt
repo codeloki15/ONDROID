@@ -299,6 +299,7 @@ class OmniAccessibilityService : AccessibilityService() {
         override val clickable get() = n.isClickable
         override val editable get() = n.isEditable
         override val scrollable get() = n.isScrollable
+        override val enabled get() = n.isEnabled
         override val children: List<FlatNode>
             get() = (0 until n.childCount).mapNotNull { n.getChild(it)?.let { c -> Adapter(c) } }
     }

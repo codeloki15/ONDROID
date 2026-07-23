@@ -9,6 +9,7 @@ interface FlatNode {
     val clickable: Boolean
     val editable: Boolean
     val scrollable: Boolean
+    val enabled: Boolean get() = true
     val children: List<FlatNode>
 }
 
@@ -25,6 +26,7 @@ object TreeFlattener {
                     PilotElement(
                         id = out.size, text = n.text, desc = n.desc, resId = n.resId,
                         cls = n.cls, bounds = n.bounds, clickable = n.clickable, editable = n.editable,
+                        enabled = n.enabled,
                     )
                 )
             }
