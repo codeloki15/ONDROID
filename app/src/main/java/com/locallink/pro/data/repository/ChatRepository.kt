@@ -215,35 +215,106 @@ class ChatRepository @Inject constructor(
     }
 
     /**
-     * Chat-only turn (the home "New chat"/"Voice chat" modes): no planner, no device control —
-     * a plain conversational reply with recent history as context. Fast and a11y-independent.
+     * Chat-only turn (the home "New chat"/"Voice chat" modes): NO planner, NO device control /
+     * accessibility service — a conversational reply that can ALSO use Composio cloud tools
+     * (Gmail, Slack, Calendar, …) via the OpenRouter tool-calling loop. Fast and a11y-independent.
+     *
+     * This is the ONLY difference from the "Automate my phone" mode ([runAgent]): here tools are
+     * cloud SaaS actions the model drives itself; there they are on-screen taps the pilot performs.
      */
-    suspend fun runChatOnly(task: String) {
+    suspend fun runChatOnly(task: String) = runChatWithTools(task, isVoice = false)
+
+    /**
+     * Conversational reply + Composio cloud tools, shared by text ("New chat") and voice
+     * ("Voice chat") modes. Streams tokens, persists tool_call/tool_result rows, and handles the
+     * OAuth-connect flow. Never touches the accessibility service.
+     *
+     * @param isVoice when true (hands-free voice loop), an app-connect (OAuth) link is NOT opened
+     *   in a browser — the reply guides the user to connect it in Settings instead, so the spoken
+     *   loop isn't interrupted. In text mode the link opens in a Custom Tab as usual.
+     */
+    suspend fun runChatWithTools(task: String, isVoice: Boolean) {
         val now = System.currentTimeMillis()
         val sessionId = ensureSession(task, now)
-        messageDao.insert(MessageEntity(sessionId = sessionId, role = "user", text = task, timestamp = now))
+        messageDao.insert(MessageEntity(sessionId = sessionId, role = "user", text = task, isVoice = isVoice, timestamp = now))
         touchSession(sessionId)
+
+        if (!openRouter.hasKey()) {
+            messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "system",
+                text = "Error: No OpenRouter API key set. Add one in Settings → AI Model to chat.",
+                timestamp = System.currentTimeMillis(),
+            ))
+            touchSession(sessionId)
+            return
+        }
+
         _isAiResponding.value = true
+        _streamingText.value = ""
         try {
             val history = messageDao.getMessages(sessionId)
                 .filter { it.role == "user" || it.role == "assistant" }
                 .dropLast(1) // the task itself goes as the final user message
                 .map { it.role to it.text }
-            val reply = openRouter.plainChat(task, history)
-            if (reply.isNotBlank()) {
-                messageDao.insert(MessageEntity(
-                    sessionId = sessionId, role = "assistant", text = reply,
-                    timestamp = System.currentTimeMillis(),
-                ))
-                _lastAssistantReply.value = reply
-            } else {
+
+            // Tracks whether the run hit an app that needs connecting but couldn't open the link
+            // (voice mode) — so we can append a spoken-friendly nudge to the final reply.
+            var pendingConnect = false
+            try {
+                openRouter.run(history, task) { _, _ -> true }.collect { event ->
+                    when (event) {
+                        is AgentEvent.Token -> _streamingText.value = event.text
+                        is AgentEvent.ToolCall -> messageDao.insert(MessageEntity(
+                            sessionId = sessionId, role = "tool_call",
+                            text = "${event.name}(${event.argsJson})", timestamp = System.currentTimeMillis(),
+                        ))
+                        is AgentEvent.ToolResult -> messageDao.insert(MessageEntity(
+                            sessionId = sessionId, role = "tool_result",
+                            text = "${event.name} → ${event.result}", timestamp = System.currentTimeMillis(),
+                        ))
+                        is AgentEvent.OpenAuthUrl -> {
+                            if (isVoice) {
+                                // Hands-free: don't yank the user into a browser mid-conversation.
+                                pendingConnect = true
+                                messageDao.insert(MessageEntity(
+                                    sessionId = sessionId, role = "system",
+                                    text = "↳ That app isn't connected yet — connect it in Settings → Connect apps.",
+                                    timestamp = System.currentTimeMillis(),
+                                ))
+                            } else {
+                                _authUrlToOpen.tryEmit(event.url)
+                                messageDao.insert(MessageEntity(
+                                    sessionId = sessionId, role = "system",
+                                    text = "↳ Opening sign-in to connect your app…",
+                                    timestamp = System.currentTimeMillis(),
+                                ))
+                            }
+                        }
+                        is AgentEvent.Final -> {
+                            val reply = if (isVoice && pendingConnect && event.text.isNotBlank())
+                                event.text + " You'll need to connect that app in the Omni app's Settings first."
+                            else event.text
+                            if (reply.isNotBlank()) messageDao.insert(MessageEntity(
+                                sessionId = sessionId, role = "assistant",
+                                text = reply, timestamp = System.currentTimeMillis(),
+                            ))
+                            _lastAssistantReply.value = reply
+                        }
+                        // Planning-agent-only events; the tool-calling chat loop never emits these.
+                        is AgentEvent.Plan, is AgentEvent.TodoStatus,
+                        is AgentEvent.InputRequested, is AgentEvent.AssistantSay -> {}
+                    }
+                }
+            } catch (e: OpenRouterUnavailable) {
+                Log.w(TAG, "OpenRouter unavailable (${e.reason})")
                 messageDao.insert(MessageEntity(
                     sessionId = sessionId, role = "system",
-                    text = "Error: no reply — check the OpenRouter key in Settings.",
+                    text = "Error: Cloud model ${e.reason}. Try again, or pick a different model in Settings.",
                     timestamp = System.currentTimeMillis(),
                 ))
             }
         } finally {
+            _streamingText.value = ""
             _isAiResponding.value = false
             touchSession(sessionId)
         }
