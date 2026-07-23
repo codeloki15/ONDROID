@@ -31,6 +31,7 @@ data class SettingsUiState(
     val isPreviewPlaying: Boolean = false,
     val previewingSpeakerId: Int? = null,
     val handsFree: Boolean = false,
+    val callAssist: Boolean = false,
     val apiKey: String = "",
     val selectedModel: String = SettingsPreferences.DEFAULT_MODEL,
     val models: List<OpenRouterModel> = emptyList(),
@@ -126,6 +127,9 @@ class SettingsViewModel @Inject constructor(
 
         viewModelScope.launch {
             settingsPreferences.handsFree.collect { h -> _uiState.update { it.copy(handsFree = h) } }
+        }
+        viewModelScope.launch {
+            settingsPreferences.callAssist.collect { c -> _uiState.update { it.copy(callAssist = c) } }
         }
         viewModelScope.launch {
             settingsPreferences.engineMode.collect { m -> _uiState.update { it.copy(engineMode = m) } }
@@ -244,6 +248,11 @@ class SettingsViewModel @Inject constructor(
     fun setHandsFree(enabled: Boolean) {
         _uiState.update { it.copy(handsFree = enabled) }
         settingsPreferences.setHandsFree(enabled)
+    }
+
+    fun setCallAssist(enabled: Boolean) {
+        _uiState.update { it.copy(callAssist = enabled) }
+        settingsPreferences.setCallAssist(enabled)
     }
 
     fun clearAllChats() {

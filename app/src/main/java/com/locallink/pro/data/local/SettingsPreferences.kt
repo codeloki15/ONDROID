@@ -55,6 +55,9 @@ class SettingsPreferences(private val context: Context) {
         // First-run onboarding wizard completed (or explicitly skipped)
         private val KEY_ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
 
+        // In-call assistant (beta): speak on live calls over speakerphone
+        private val KEY_CALL_ASSIST = booleanPreferencesKey("call_assist_enabled")
+
         // LLM engine mode (cloud / local routing)
         private val KEY_ENGINE_MODE = stringPreferencesKey("engine_mode")
 
@@ -127,6 +130,11 @@ class SettingsPreferences(private val context: Context) {
     val handsFree: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_HANDS_FREE] ?: false }
     suspend fun loadHandsFree(): Boolean = handsFree.first()
     fun setHandsFree(enabled: Boolean) = editAsync { it[KEY_HANDS_FREE] = enabled }
+
+    // In-call assistant (beta)
+    val callAssist: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_CALL_ASSIST] ?: false }
+    suspend fun loadCallAssist(): Boolean = callAssist.first()
+    fun setCallAssist(enabled: Boolean) = editAsync { it[KEY_CALL_ASSIST] = enabled }
 
     // First-run onboarding
     val onboardingDone: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_ONBOARDING_DONE] ?: false }

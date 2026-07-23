@@ -55,6 +55,18 @@ class MemoryStore @Inject constructor(
     suspend fun clear() = dao.deleteAll()
     suspend fun count(): Int = dao.all().size
 
+    /** Resolve "wife" / "mom" / "the office" to a stored phone number, if we know one. */
+    suspend fun findPhone(target: String): String? {
+        val tokens = Regex("[a-z]+").findAll(target.lowercase()).map { it.value }
+            .filter { it !in setOf("my", "the", "a", "an", "to", "please") }.toList()
+        if (tokens.isEmpty()) return null
+        val phoneShaped = Regex("^[+0-9][0-9 ()\\-]{5,}$")
+        return dao.all().firstOrNull { f ->
+            (f.key.contains("phone") || f.key.contains("number") || phoneShaped.matches(f.value.trim())) &&
+                tokens.any { f.key.contains(it) }
+        }?.value?.trim()
+    }
+
     /** "Known facts about the user" block for system prompts; "" when nothing is stored. */
     suspend fun promptBlock(): String {
         val facts = dao.all().take(MAX_FACTS_IN_PROMPT)

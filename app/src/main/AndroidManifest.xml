@@ -17,6 +17,7 @@
 
     <!-- Tool: make_phone_call -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <!-- Tool: read_contacts -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Tool: read_calendar -->

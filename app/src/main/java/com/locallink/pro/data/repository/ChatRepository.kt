@@ -35,6 +35,7 @@ class ChatRepository @Inject constructor(
     private val settings: SettingsPreferences,
     private val experiences: ExperienceStore,
     private val memory: MemoryStore,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) {
     private companion object { const val TAG = "ChatRepository" }
 
@@ -364,6 +365,36 @@ class ChatRepository @Inject constructor(
         messageDao.insert(MessageEntity(sessionId = sessionId, role = "user", text = task, timestamp = now))
         touchSession(sessionId)
         memory.maybeExtract(task) { p -> openRouter.plainChat(p) }
+
+        // FAST PATH — "call/dial <number|remembered contact>": open the dialer prefilled
+        // (ACTION_DIAL — the user presses the actual call button; we never place calls
+        // unattended). Memory facts resolve "call my wife" without asking.
+        val dialTarget = Regex("^\\s*(?:call|dial|phone)\\s+(.{1,60})$", RegexOption.IGNORE_CASE)
+            .find(task)?.groupValues?.get(1)?.trim()?.trimEnd('.', '!', '?')
+        if (dialTarget != null) {
+            val number = dialTarget.takeIf { it.matches(Regex("^[+0-9][0-9 ()\\-]{4,}$")) }
+                ?: memory.findPhone(dialTarget)
+            if (number != null) {
+                val opened = runCatching {
+                    appContext.startActivity(
+                        android.content.Intent(
+                            android.content.Intent.ACTION_DIAL,
+                            android.net.Uri.parse("tel:${android.net.Uri.encode(number)}"),
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }.isSuccess
+                val reply = if (opened)
+                    "Dialer is ready for $dialTarget ($number) — press the call button to connect."
+                else "I couldn't open the dialer."
+                messageDao.insert(MessageEntity(
+                    sessionId = sessionId, role = "assistant", text = reply,
+                    timestamp = System.currentTimeMillis(),
+                ))
+                _lastAssistantReply.value = reply
+                touchSession(sessionId)
+                return
+            }
+        }
         val service = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
         if (service == null) {
             // No device control available — still answer in plain chat instead of hard-failing.
