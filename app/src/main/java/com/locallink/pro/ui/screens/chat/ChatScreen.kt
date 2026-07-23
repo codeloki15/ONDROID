@@ -114,12 +114,27 @@ fun ChatScreen(
         val count = state.messages.size + if (state.streamingText.isNotBlank() || state.isAiResponding) 1 else 0
         if (count > 0) listState.animateScrollToItem(count - 1)
     }
-    // Voice sent → bring the user back to the conversation to watch the reply.
+    // Text/auto modes: a sent utterance drops back to the conversation to watch the reply.
+    // VOICE mode is a continuous conversation — the overlay STAYS, the reply is spoken, and
+    // the mic re-opens for the next turn (only after a completed turn, so a manual pause
+    // stays paused).
+    var relistenPending by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        vm.voiceFinal.collect { voiceMode = false }
+        vm.voiceFinal.collect { if (mode == "voice") relistenPending = true else voiceMode = false }
     }
     LaunchedEffect(state.isAiResponding) {
-        if (state.isAiResponding && voiceMode) voiceMode = false
+        if (state.isAiResponding && voiceMode && mode != "voice") voiceMode = false
+    }
+    if (mode == "voice") {
+        LaunchedEffect(relistenPending, state.isSpeaking, state.isAiResponding) {
+            if (relistenPending && voiceMode && !state.isSpeaking && !state.isAiResponding && !state.isListening) {
+                kotlinx.coroutines.delay(350) // let the TTS audio route release the mic
+                if (!state.isListening && !state.isAiResponding) {
+                    relistenPending = false
+                    vm.toggleVoiceInput()
+                }
+            }
+        }
     }
 
     val pickMedia = rememberLauncherForActivityResult(

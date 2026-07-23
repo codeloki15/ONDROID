@@ -32,6 +32,11 @@ object PilotActionSchema {
         first — usually scrolling the page content to the bottom (consent/onboarding screens),
         filling a required field, or selecting an item. Do that FIRST, then tap.
 
+        RECOGNIZE SUCCESS: before acting, check whether the goal is ALREADY achieved on this
+        screen — e.g. the requested song/video is playing, the setting is already toggled, the
+        message was sent. If so call done(result) IMMEDIATELY. Never tap additional search
+        results or repeat an action "to be sure" once playback/​the goal state has started.
+
         Self-preservation: NEVER open Accessibility settings, never tap anything named
         "OmniPro", and never uninstall/force-stop/disable OmniPro — that is you; touching it
         kills the running task. If you find yourself on an Accessibility or OmniPro screen,

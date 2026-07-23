@@ -52,7 +52,8 @@ class MemoryPilot(
                         "${outcome.reason} — continuing with reasoning", true,
                 ))
                 primed = outcome.executedNotes.map { "replayed learned step: $it" } +
-                    "the learned routine diverged here (${outcome.reason}) — continue the task from the CURRENT screen"
+                    "the learned routine diverged here (${outcome.reason}) — continue the task from the CURRENT screen" +
+                    "usually ONE more action finishes it (e.g. tap the matching result); the moment the goal state is visible, call done()"
             } else {
                 emit(AgentEvent.ToolResult(id, "replay_routine", "screen diverged (${outcome.reason}) — reasoning instead", false))
             }
