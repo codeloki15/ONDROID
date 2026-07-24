@@ -210,12 +210,12 @@ fun NotificationRulesScreen(
                 Column {
                     OutlinedTextField(
                         value = pkg, onValueChange = { pkg = it }, singleLine = true,
-                        label = { Text("App (e.g. whatsapp — empty = any)") },
+                        label = { Text("App name (e.g. Gmail, WhatsApp — empty = any)") },
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = contains, onValueChange = { contains = it }, singleLine = true,
-                        label = { Text("Text contains (empty = any)") },
+                        label = { Text("Text contains — use 'or' for alternatives (empty = any)") },
                     )
                     Spacer(Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {

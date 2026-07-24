@@ -60,18 +60,28 @@ class OmniNotificationListener : NotificationListenerService() {
         }
 
         scope.launch {
-            val matched = runCatching { rules.enabled() }.getOrDefault(emptyList()).filter { r ->
-                (r.appPackage.isBlank() || pkg.contains(r.appPackage, ignoreCase = true)) &&
-                    (r.matchText.isBlank() ||
-                        title.contains(r.matchText, ignoreCase = true) ||
-                        text.contains(r.matchText, ignoreCase = true))
-            }
-            if (matched.isEmpty()) return@launch
+            // Resolve the human app name BEFORE matching: users type "Gmail", but the
+            // package is com.google.android.gm — package-substring alone can never match.
             val appLabel = runCatching {
                 packageManager.getApplicationLabel(
                     packageManager.getApplicationInfo(pkg, 0)
                 ).toString()
             }.getOrDefault(pkg)
+
+            val matched = runCatching { rules.enabled() }.getOrDefault(emptyList()).filter { r ->
+                val appOk = r.appPackage.isBlank() ||
+                    pkg.contains(r.appPackage, ignoreCase = true) ||
+                    appLabel.contains(r.appPackage, ignoreCase = true)
+                // "lokesh or codelokiyt", "otp, code" — any alternative may match.
+                val textOk = r.matchText.isBlank() || r.matchText
+                    .split(Regex("\\s+or\\s+|,|\\|", RegexOption.IGNORE_CASE))
+                    .map { it.trim() }.filter { it.isNotEmpty() }
+                    .any { alt ->
+                        title.contains(alt, ignoreCase = true) || text.contains(alt, ignoreCase = true)
+                    }
+                appOk && textOk
+            }
+            if (matched.isEmpty()) return@launch
             Log.i(TAG, "notification from $appLabel matched ${matched.size} rule(s)")
 
             for (r in matched) {
