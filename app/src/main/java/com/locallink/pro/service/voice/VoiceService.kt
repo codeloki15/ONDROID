@@ -294,6 +294,21 @@ class VoiceService @Inject constructor(
         }
     }
 
+    /**
+     * Speak after making sure a TTS engine is actually up. Needed by background triggers
+     * (notifications, calls): the voice stack is torn down when the chat UI closes, and
+     * a bare [speak] right after [initialize] races the async engine load — the utterance
+     * is dropped on the "no engine ready" floor (observed with a real Gmail trigger:
+     * Kokoro finished loading 2s after the speech was discarded).
+     */
+    suspend fun speakWhenReady(text: String, timeoutMs: Long = 12_000) {
+        initialize()
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            while (!kokoroTts.isReady.value && !androidTtsReady) kotlinx.coroutines.delay(100)
+        }
+        speak(text)
+    }
+
     fun speak(text: String) {
         // Strip markdown before speaking to avoid TTS saying "star star" etc.
         val cleanText = stripMarkdown(text)

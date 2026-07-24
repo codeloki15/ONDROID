@@ -88,7 +88,7 @@ class OmniNotificationListener : NotificationListenerService() {
                             if (title.isNotBlank()) append("$title. ")
                             if (text.isNotBlank()) append(text)
                         }.take(400)
-                        runCatching { voice.initialize(); voice.speak(line) }
+                        runCatching { voice.speakWhenReady(line) }
                             .onFailure { Log.e(TAG, "speak trigger failed", it) }
                     }
                 }

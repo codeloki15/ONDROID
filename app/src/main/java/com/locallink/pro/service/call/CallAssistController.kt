@@ -103,9 +103,8 @@ class CallAssistController @Inject constructor(
         loopJob = scope.launch {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             runCatching { am.isSpeakerphoneOn = true }
-            voice.initialize()
             delay(1500) // let the call audio settle
-            voice.speak("Hello, this is Omni, the assistant. How can I help?")
+            voice.speakWhenReady("Hello, this is Omni, the assistant. How can I help?")
             while (loopJob?.isActive == true) {
                 // wait for TTS to finish before opening the mic
                 withTimeoutOrNull(20_000) { voice.isSpeaking.first { !it } }
