@@ -131,8 +131,8 @@ fun SettingsScreen(
                         if (granted) com.locallink.pro.service.call.CallAssistUtil.restart(ctx)
                     }
                     SettingsToggle(
-                        title = "In-call assistant (beta)",
-                        subtitle = "On speakerphone, Omni listens and speaks on your calls",
+                        title = "In-call assistant (experimental)",
+                        subtitle = "Limited: Android 12+ blocks call audio for apps — full version (dialer mode) coming",
                         icon = Icons.Outlined.Call,
                         checked = uiState.callAssist,
                         onCheckedChange = { on ->

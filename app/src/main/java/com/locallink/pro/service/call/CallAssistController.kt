@@ -34,6 +34,12 @@ import javax.inject.Singleton
  *
  * Constraints: works only on speakerphone; STT quality depends on room acoustics;
  * the mic is single-owner (hands-free wake listening pauses during a call).
+ *
+ * VERIFIED LIMITATION (live call test, Galaxy S25 Ultra / Android 15, 2026-07-24):
+ * modern Android ignores app speakerphone requests during cellular calls and feeds
+ * apps silence from the mic — both bridge directions fail. The real implementation
+ * needs the dialer role (InCallService + setAudioRoute); this controller's loop is
+ * the reusable core for that.
  */
 @Singleton
 class CallAssistController @Inject constructor(
