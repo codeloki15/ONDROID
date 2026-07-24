@@ -87,8 +87,18 @@ class OmniNotificationListener : NotificationListenerService() {
             for (r in matched) {
                 when (r.action) {
                     "agent" -> {
-                        val task = r.agentTask.ifBlank { "Handle this notification: {app}: {title} — {text}" }
+                        val hasVars = listOf("{app}", "{title}", "{text}")
+                            .any { r.agentTask.contains(it) }
+                        var task = r.agentTask.ifBlank { "Handle this notification: {app}: {title} — {text}" }
                             .replace("{app}", appLabel).replace("{title}", title).replace("{text}", text)
+                        // A bare task like "reply him back" reaches the planner with no
+                        // mention of WHICH notification/app triggered it — it then guesses
+                        // (e.g. opens Messages for a Gmail email). Always carry the context.
+                        if (r.agentTask.isNotBlank() && !hasVars) {
+                            task += "\n\n[Context: this was triggered by a notification from the " +
+                                "$appLabel app — \"$title\": \"$text\". Act on THIS notification " +
+                                "inside $appLabel.]"
+                        }
                         runCatching { chat.runAgent(task) }
                             .onFailure { Log.e(TAG, "agent trigger failed", it) }
                     }
