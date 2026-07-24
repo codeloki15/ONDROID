@@ -18,6 +18,7 @@ import com.locallink.pro.ui.screens.connect.ConnectScreen
 import com.locallink.pro.ui.screens.memory.MemoryScreen
 import com.locallink.pro.ui.screens.model.ModelGateScreen
 import com.locallink.pro.ui.screens.notifyrules.NotificationRulesScreen
+import com.locallink.pro.ui.screens.notifyrules.TriggerHistoryScreen
 import com.locallink.pro.ui.screens.onboarding.OnboardingScreen
 import com.locallink.pro.ui.screens.onboarding.OnboardingViewModel
 import com.locallink.pro.ui.screens.routines.RoutinesScreen
@@ -34,6 +35,7 @@ object Routes {
     const val ROUTINES = "routines"
     const val MEMORY = "memory"
     const val NOTIFY_RULES = "notify_rules"
+    const val TRIGGER_HISTORY = "trigger_history"
 }
 
 @Composable
@@ -120,7 +122,13 @@ fun LocalLinkNavGraph(navController: NavHostController) {
             MemoryScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.NOTIFY_RULES) {
-            NotificationRulesScreen(onBack = { navController.popBackStack() })
+            NotificationRulesScreen(
+                onBack = { navController.popBackStack() },
+                onOpenHistory = { navController.navigate(Routes.TRIGGER_HISTORY) },
+            )
+        }
+        composable(Routes.TRIGGER_HISTORY) {
+            TriggerHistoryScreen(onBack = { navController.popBackStack() })
         }
     }
 }

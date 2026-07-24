@@ -6,8 +6,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [SessionEntity::class, MessageEntity::class, ExperienceEntity::class, MemoryFactEntity::class, NotificationRuleEntity::class],
-    version = 6,
+    entities = [SessionEntity::class, MessageEntity::class, ExperienceEntity::class, MemoryFactEntity::class, NotificationRuleEntity::class, TriggerRunEntity::class],
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -16,6 +16,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun experienceDao(): ExperienceDao
     abstract fun memoryFactDao(): MemoryFactDao
     abstract fun notificationRuleDao(): NotificationRuleDao
+    abstract fun triggerRunDao(): TriggerRunDao
 
     companion object {
         /** v1 → v2: learned pilot routines ("experiences"). */
@@ -44,6 +45,29 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `experiences` ADD COLUMN `slotResidual` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** v6 → v7: IFTTT-style triggers — time-based rules + execution history. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `notification_rules` ADD COLUMN `triggerType` TEXT NOT NULL DEFAULT 'notification'")
+                db.execSQL("ALTER TABLE `notification_rules` ADD COLUMN `timeHour` INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE `notification_rules` ADD COLUMN `timeMinute` INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE `notification_rules` ADD COLUMN `targetApp` TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `trigger_runs` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `ruleId` INTEGER NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `detail` TEXT NOT NULL,
+                        `startedAt` INTEGER NOT NULL,
+                        `finishedAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
             }
         }
 

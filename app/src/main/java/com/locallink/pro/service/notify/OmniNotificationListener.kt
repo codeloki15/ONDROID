@@ -5,8 +5,6 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.locallink.pro.data.db.NotificationRuleDao
-import com.locallink.pro.data.repository.ChatRepository
-import com.locallink.pro.service.voice.VoiceService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,8 +28,7 @@ class OmniNotificationListener : NotificationListenerService() {
     }
 
     @Inject lateinit var rules: NotificationRuleDao
-    @Inject lateinit var voice: VoiceService
-    @Inject lateinit var chat: ChatRepository
+    @Inject lateinit var executor: TriggerExecutor
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val recent = HashMap<String, Long>() // dedupe: content hash → last handled
@@ -85,33 +82,9 @@ class OmniNotificationListener : NotificationListenerService() {
             Log.i(TAG, "notification from $appLabel matched ${matched.size} rule(s)")
 
             for (r in matched) {
-                when (r.action) {
-                    "agent" -> {
-                        val hasVars = listOf("{app}", "{title}", "{text}")
-                            .any { r.agentTask.contains(it) }
-                        var task = r.agentTask.ifBlank { "Handle this notification: {app}: {title} — {text}" }
-                            .replace("{app}", appLabel).replace("{title}", title).replace("{text}", text)
-                        // A bare task like "reply him back" reaches the planner with no
-                        // mention of WHICH notification/app triggered it — it then guesses
-                        // (e.g. opens Messages for a Gmail email). Always carry the context.
-                        if (r.agentTask.isNotBlank() && !hasVars) {
-                            task += "\n\n[Context: this was triggered by a notification from the " +
-                                "$appLabel app — \"$title\": \"$text\". Act on THIS notification " +
-                                "inside $appLabel.]"
-                        }
-                        runCatching { chat.runAgent(task) }
-                            .onFailure { Log.e(TAG, "agent trigger failed", it) }
-                    }
-                    else -> { // "speak"
-                        val line = buildString {
-                            append("Notification from $appLabel. ")
-                            if (title.isNotBlank()) append("$title. ")
-                            if (text.isNotBlank()) append(text)
-                        }.take(400)
-                        runCatching { voice.speakWhenReady(line) }
-                            .onFailure { Log.e(TAG, "speak trigger failed", it) }
-                    }
-                }
+                runCatching {
+                    executor.execute(r, "$appLabel notification", Triple(appLabel, title, text))
+                }.onFailure { Log.e(TAG, "trigger execution failed", it) }
             }
         }
     }

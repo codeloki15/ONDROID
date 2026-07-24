@@ -359,7 +359,7 @@ class ChatRepository @Inject constructor(
     }
 
     /** Planning-agent entry: plan → route todos to chat/composio/pilot → execute, with input pauses. */
-    suspend fun runAgent(task: String) {
+    suspend fun runAgent(task: String, onOutcome: ((Boolean, String) -> Unit)? = null) {
         val now = System.currentTimeMillis()
         val sessionId = ensureSession(task, now)
         messageDao.insert(MessageEntity(sessionId = sessionId, role = "user", text = task, timestamp = now))
@@ -392,6 +392,7 @@ class ChatRepository @Inject constructor(
                 ))
                 _lastAssistantReply.value = reply
                 touchSession(sessionId)
+                onOutcome?.invoke(opened, reply)
                 return
             }
         }
@@ -420,6 +421,7 @@ class ChatRepository @Inject constructor(
             } finally {
                 _isAiResponding.value = false
                 touchSession(sessionId)
+                onOutcome?.invoke(false, "accessibility service off — answered in chat only")
             }
             return
         }
@@ -445,10 +447,18 @@ class ChatRepository @Inject constructor(
                 a
             }
             noteIfQueued(sessionId, task)
+            var replayStopped = false
             service.runPilotFlow(
                 flow = serialized(task, memoryPilot(service.asActuator(), askUser = fastAsk).run(task)),
-                onEvent = { persistPilotEvent(sessionId, it) },
-                onComplete = { _ -> _isAiResponding.value = false; touchSession(sessionId) },
+                onEvent = { e ->
+                    if (e is AgentEvent.Final && e.text.startsWith("Stopped")) replayStopped = true
+                    persistPilotEvent(sessionId, e)
+                },
+                onComplete = { cause ->
+                    _isAiResponding.value = false; touchSession(sessionId)
+                    onOutcome?.invoke(cause == null && !replayStopped,
+                        cause?.message ?: if (replayStopped) "agent stopped mid-task" else "completed")
+                },
             )
             return
         }
@@ -495,10 +505,18 @@ class ChatRepository @Inject constructor(
             screenSummary = screenSummaryOf(service.asActuator()),
         )
         noteIfQueued(sessionId, task)
+        var planStopped = false
         service.runPilotFlow(
             flow = serialized(task, executor.run(task)),
-            onEvent = { persistPilotEvent(sessionId, it) },
-            onComplete = { _ -> _isAiResponding.value = false; touchSession(sessionId) },
+            onEvent = { e ->
+                if (e is AgentEvent.Final && e.text.startsWith("Stopped")) planStopped = true
+                persistPilotEvent(sessionId, e)
+            },
+            onComplete = { cause ->
+                _isAiResponding.value = false; touchSession(sessionId)
+                onOutcome?.invoke(cause == null && !planStopped,
+                    cause?.message ?: if (planStopped) "agent stopped mid-task" else "completed")
+            },
         )
     }
 

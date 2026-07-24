@@ -6,6 +6,7 @@ import com.locallink.pro.data.db.AppDatabase
 import com.locallink.pro.data.db.ExperienceDao
 import com.locallink.pro.data.db.MemoryFactDao
 import com.locallink.pro.data.db.NotificationRuleDao
+import com.locallink.pro.data.db.TriggerRunDao
 import com.locallink.pro.data.db.MessageDao
 import com.locallink.pro.data.db.SessionDao
 import com.locallink.pro.data.local.SettingsPreferences
@@ -30,7 +31,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "omnipin.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .build()
 
     @Provides fun provideSessionDao(db: AppDatabase): SessionDao = db.sessionDao()
@@ -38,4 +39,5 @@ object AppModule {
     @Provides fun provideExperienceDao(db: AppDatabase): ExperienceDao = db.experienceDao()
     @Provides fun provideMemoryFactDao(db: AppDatabase): MemoryFactDao = db.memoryFactDao()
     @Provides fun provideNotificationRuleDao(db: AppDatabase): NotificationRuleDao = db.notificationRuleDao()
+    @Provides fun provideTriggerRunDao(db: AppDatabase): TriggerRunDao = db.triggerRunDao()
 }
