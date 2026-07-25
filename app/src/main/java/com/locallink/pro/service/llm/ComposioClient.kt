@@ -3,6 +3,8 @@ package com.locallink.pro.service.llm
 import android.util.Log
 import com.locallink.pro.data.local.SettingsPreferences
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -41,6 +43,14 @@ class ComposioClient @Inject constructor(
         /** Caps for [directToolSchemas] — registered tools cost prompt tokens on every turn. */
         private const val PER_TOOLKIT = 6
         private const val MAX_DIRECT_TOOLS = 24
+
+        /** Filler that carries no signal for tool search — see keywordsOf. */
+        private val SEARCH_STOP_WORDS = setOf(
+            "the", "what", "whats", "who", "how", "can", "you", "please", "and", "for", "with",
+            "from", "into", "this", "that", "there", "here", "any", "all", "get", "got", "let",
+            "does", "did", "was", "are", "were", "would", "could", "should", "your", "mine",
+            "latest", "recent", "most", "new", "app", "using", "about", "tell", "show", "give",
+        )
     }
 
     private val json = "application/json; charset=utf-8".toMediaType()
@@ -96,19 +106,21 @@ class ComposioClient @Inject constructor(
      * always going to have. Fetching those schemas once and registering them natively lets the
      * model call GMAIL_SEND_EMAIL in a single hop, executed directly through [execute].
      *
-     * Bounded deliberately: every registered tool costs prompt tokens on EVERY turn, so this
-     * takes the most prominent [PER_TOOLKIT] tools per app up to [MAX_DIRECT_TOOLS] overall.
-     * Anything outside that set still works — the meta-tools remain registered as the fallback.
+     * Selection is driven by [query] — the user's own words — because the tools endpoint returns
+     * results alphabetically otherwise, which registers whatever happens to sort first rather
+     * than what the request needs. See [fetchToolsFor].
      *
-     * Cached in memory against the connected-toolkit list, so reconnecting an app refreshes it.
+     * Bounded deliberately: every registered tool costs prompt tokens on EVERY turn, so this
+     * takes at most [PER_TOOLKIT] per app up to [MAX_DIRECT_TOOLS] overall. Anything outside
+     * that set still works — the meta-tools remain registered as the fallback.
      */
-    suspend fun directToolSchemas(): JSONArray = withContext(Dispatchers.IO) {
+    suspend fun directToolSchemas(query: String): JSONArray = withContext(Dispatchers.IO) {
         val key = settings.loadComposioApiKey()
         if (key.isBlank()) return@withContext JSONArray()
         val toolkits = connectedToolkits()
         if (toolkits.isEmpty()) return@withContext JSONArray()
 
-        val cacheKey = toolkits.sorted().joinToString(",")
+        val cacheKey = toolkits.sorted().joinToString(",") + "|" + query.trim().lowercase()
         cachedDirect?.let { if (cachedDirectFor == cacheKey) return@withContext it }
 
         // Share the budget across apps instead of letting the first few spend it. Taking
@@ -117,46 +129,94 @@ class ComposioClient @Inject constructor(
         // were never registered at all, so their tools silently fell back to the slow path.
         val perToolkit = (MAX_DIRECT_TOOLS / toolkits.size).coerceIn(1, PER_TOOLKIT)
 
+        // Fetch every app at once: this runs on the request's critical path, so 7 sequential
+        // round trips would cost more than the LLM hops it's meant to save.
+        val perApp = kotlinx.coroutines.coroutineScope {
+            toolkits.map { slug ->
+                async { slug to fetchToolsFor(slug, query, perToolkit, key) }
+            }.awaitAll()
+        }
+
         val out = JSONArray()
-        for (slug in toolkits) {
+        for ((slug, picked) in perApp) {
             if (out.length() >= MAX_DIRECT_TOOLS) break
-            var takenHere = 0
-            runCatching {
-                val (code, text) = get("$LIST_URL?toolkit_slug=$slug&limit=$perToolkit", key)
-                if (code != 200) {
-                    Log.w(TAG, "directTools $slug HTTP $code")
-                    return@runCatching
-                }
-                val items = JSONObject(text).optJSONArray("items")
-                    ?: JSONObject(text).optJSONArray("data") ?: JSONArray()
-                for (i in 0 until items.length()) {
-                    if (out.length() >= MAX_DIRECT_TOOLS || takenHere >= perToolkit) break
-                    val t = items.getJSONObject(i)
-                    val name = t.optString("slug").ifBlank { t.optString("name") }
-                    if (name.isBlank() || t.optBoolean("deprecated", false)) continue
-                    takenHere++
-                    val params = t.optJSONObject("input_parameters")
-                        ?: t.optJSONObject("parameters")
-                        ?: JSONObject().put("type", "object").put("properties", JSONObject())
-                    out.put(
-                        JSONObject().put("type", "function").put(
-                            "function",
-                            JSONObject()
-                                .put("name", name)
-                                .put("description", t.optString("description").take(300))
-                                .put("parameters", params),
-                        ),
-                    )
-                    discovered.add(name)   // so execute() recognises it later
-                }
-            }.onFailure { Log.w(TAG, "directTools $slug failed", it) }
+            val names = ArrayList<String>(picked.size)
+            for (t in picked) {
+                if (out.length() >= MAX_DIRECT_TOOLS) break
+                val name = t.optString("slug").ifBlank { t.optString("name") }
+                if (name.isBlank() || t.optBoolean("deprecated", false)) continue
+                val params = t.optJSONObject("input_parameters")
+                    ?: t.optJSONObject("parameters")
+                    ?: JSONObject().put("type", "object").put("properties", JSONObject())
+                out.put(
+                    JSONObject().put("type", "function").put(
+                        "function",
+                        JSONObject()
+                            .put("name", name)
+                            .put("description", t.optString("description").take(300))
+                            .put("parameters", params),
+                    ),
+                )
+                discovered.add(name)   // so execute() recognises it later
+                names += name
+            }
+            Log.i(TAG, "directTools $slug -> $names")
         }
         Log.i(TAG, "registered ${out.length()} direct tools from ${toolkits.size} " +
-            "connected app(s) (<=$perToolkit each)")
+            "connected app(s) (<=$perToolkit each) for \"${query.take(48)}\"")
         cachedDirect = out
         cachedDirectFor = cacheKey
         out
     }
+
+    /**
+     * The [limit] tools from [slug] most relevant to [query].
+     *
+     * The tools endpoint returns results ALPHABETICALLY when unfiltered, which made the first
+     * version of this useless: Gmail's first three are ADD_LABEL_TO_EMAIL, BATCH_DELETE_MESSAGES
+     * and BATCH_MODIFY_MESSAGES — no send, no read — while GMAIL_SEND_EMAIL sat outside the
+     * registered set and still paid for meta-tool discovery. Passing the user's own words as
+     * `search` is what surfaces the tools a request actually needs.
+     */
+    private fun fetchToolsFor(
+        slug: String,
+        query: String,
+        limit: Int,
+        key: String,
+    ): List<JSONObject> = runCatching {
+        // Search wants KEYWORDS, not a sentence. Passing the raw question through returned zero
+        // results for every connected app ("What is the subject of my latest email?" matched
+        // nothing), while the bare terms behind it match fine.
+        val terms = keywordsOf(query)
+        val fetch = { suffix: String ->
+            val (code, text) = get("$LIST_URL?toolkit_slug=$slug&limit=$limit$suffix", key)
+            if (code != 200) {
+                Log.w(TAG, "directTools $slug HTTP $code")
+                emptyList()
+            } else {
+                val root = JSONObject(text)
+                val items = root.optJSONArray("items") ?: root.optJSONArray("data") ?: JSONArray()
+                (0 until items.length()).mapNotNull { items.optJSONObject(it) }
+            }
+        }
+
+        // No keyword hit means this app has nothing to do with the request — register nothing.
+        // A fallback here actively hurt: `important=true` returned Calendar's ACL_DELETE/GET/
+        // INSERT for an email question, spending prompt budget on tools the turn can't use.
+        // Most requests concern one app, so the other six SHOULD contribute nothing; the
+        // meta-tools still reach them if the model turns out to need one.
+        if (terms.isBlank()) emptyList()
+        else fetch("&search=" + java.net.URLEncoder.encode(terms, "UTF-8"))
+    }.onFailure { Log.w(TAG, "directTools $slug failed", it) }.getOrDefault(emptyList())
+
+    /** Content words from a request, for the tools endpoint's keyword search. */
+    private fun keywordsOf(query: String): String =
+        query.lowercase()
+            .split(Regex("[^a-z0-9]+"))
+            .filter { it.length > 2 && it !in SEARCH_STOP_WORDS }
+            .distinct()
+            .take(4)
+            .joinToString(" ")
 
     /**
      * On-demand tool discovery: fetch a connected app's tools, rank by [query], return the top
