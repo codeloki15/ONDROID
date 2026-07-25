@@ -87,9 +87,22 @@ class RoutineRecorder @Inject constructor() {
         // Omni's own UI is the recording controls, never part of what's being taught.
         if (pkg == selfPackage) return
 
+        // Nothing that happens in the launcher, system UI or the keyboard is a step.
+        //
+        // Taps were previously let through here, so opening an app by tapping its home-screen
+        // icon recorded `tap com.android.launcher:id/icon` — a target that is never on screen
+        // at replay time. Observed live: a taught Amazon routine failed on step 1 with
+        // "target not on screen (com.android.launcher:id/icon)". Launching is already captured
+        // as launch_app from the window change that follows, which replays properly.
+        if (pkg.isNotBlank() && !looksLikeApp(pkg)) {
+            // Still track the window change so the next real app is recognised as a switch.
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) currentPackage = null
+            return
+        }
+
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                if (pkg.isNotBlank() && pkg != currentPackage && looksLikeApp(pkg)) {
+                if (pkg.isNotBlank() && pkg != currentPackage) {
                     currentPackage = pkg
                     add(TraceStep(action = "launch_app", arg = pkg))
                 }
