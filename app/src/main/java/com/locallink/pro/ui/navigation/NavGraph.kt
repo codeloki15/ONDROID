@@ -131,7 +131,12 @@ fun LocalLinkNavGraph(navController: NavHostController) {
             arguments = listOf(navArgument("name") { type = NavType.StringType; defaultValue = "" }),
         ) { entry ->
             com.locallink.pro.ui.screens.routines.TeachRoutineScreen(
-                routineName = entry.arguments?.getString("name").orEmpty(),
+                // Decoded: the name is encoded into the route, and an undecoded one is what
+                // gets SAVED and later matched, so "lavazza gusto crema" would become
+                // "lavazza+gusto+crema+price" in the library.
+                routineName = runCatching {
+                    java.net.URLDecoder.decode(entry.arguments?.getString("name").orEmpty(), "UTF-8")
+                }.getOrDefault(entry.arguments?.getString("name").orEmpty()),
                 onBack = { navController.popBackStack() },
                 onSaved = { navController.popBackStack() },
             )

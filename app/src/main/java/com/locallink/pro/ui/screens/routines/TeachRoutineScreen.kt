@@ -1,6 +1,7 @@
 package com.locallink.pro.ui.screens.routines
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -114,16 +115,31 @@ fun TeachRoutineScreen(
                         value = draft,
                         onValueChange = { draft = it },
                         enabled = !running,
+                        singleLine = true,
                         label = { Text(if (steps.isEmpty()) "First step…" else "Next step…") },
                         placeholder = { Text("e.g. search for Lavazza Gusto Crema") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Send,
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onSend = { if (draft.isNotBlank()) { vm.runStep(draft); draft = "" } },
+                        ),
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(10.dp))
+                    val canSend = !running && draft.isNotBlank()
+                    // Clickable Box rather than an IconButton nested inside one: the inner
+                    // button's own 48dp touch target got constrained by the wrapper and taps
+                    // on the circle did nothing at all.
                     Box(
                         Modifier
                             .size(48.dp)
                             .clip(CircleShape)
-                            .background(if (running || draft.isBlank()) OmniBorder else OmniText),
+                            .background(if (canSend) OmniText else OmniBorder)
+                            .then(
+                                if (canSend) Modifier.clickable { vm.runStep(draft); draft = "" }
+                                else Modifier
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (running) {
@@ -131,12 +147,10 @@ fun TeachRoutineScreen(
                                 Modifier.size(20.dp), color = OmniTextDim, strokeWidth = 2.dp,
                             )
                         } else {
-                            IconButton(
-                                enabled = draft.isNotBlank(),
-                                onClick = { vm.runStep(draft); draft = "" },
-                            ) {
-                                Icon(Icons.AutoMirrored.Outlined.Send, "Run step", tint = Color.White)
-                            }
+                            Icon(
+                                Icons.AutoMirrored.Outlined.Send, "Run step",
+                                tint = Color.White, modifier = Modifier.size(20.dp),
+                            )
                         }
                     }
                 }
