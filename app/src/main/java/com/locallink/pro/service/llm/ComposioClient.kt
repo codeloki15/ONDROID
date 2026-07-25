@@ -111,11 +111,18 @@ class ComposioClient @Inject constructor(
         val cacheKey = toolkits.sorted().joinToString(",")
         cachedDirect?.let { if (cachedDirectFor == cacheKey) return@withContext it }
 
+        // Share the budget across apps instead of letting the first few spend it. Taking
+        // PER_TOOLKIT from each in turn looks fine until there are enough apps to exhaust the
+        // cap: with 7 connected accounts the first four filled all 24 slots and the last three
+        // were never registered at all, so their tools silently fell back to the slow path.
+        val perToolkit = (MAX_DIRECT_TOOLS / toolkits.size).coerceIn(1, PER_TOOLKIT)
+
         val out = JSONArray()
         for (slug in toolkits) {
             if (out.length() >= MAX_DIRECT_TOOLS) break
+            var takenHere = 0
             runCatching {
-                val (code, text) = get("$LIST_URL?toolkit_slug=$slug&limit=$PER_TOOLKIT", key)
+                val (code, text) = get("$LIST_URL?toolkit_slug=$slug&limit=$perToolkit", key)
                 if (code != 200) {
                     Log.w(TAG, "directTools $slug HTTP $code")
                     return@runCatching
@@ -123,10 +130,11 @@ class ComposioClient @Inject constructor(
                 val items = JSONObject(text).optJSONArray("items")
                     ?: JSONObject(text).optJSONArray("data") ?: JSONArray()
                 for (i in 0 until items.length()) {
-                    if (out.length() >= MAX_DIRECT_TOOLS) break
+                    if (out.length() >= MAX_DIRECT_TOOLS || takenHere >= perToolkit) break
                     val t = items.getJSONObject(i)
                     val name = t.optString("slug").ifBlank { t.optString("name") }
                     if (name.isBlank() || t.optBoolean("deprecated", false)) continue
+                    takenHere++
                     val params = t.optJSONObject("input_parameters")
                         ?: t.optJSONObject("parameters")
                         ?: JSONObject().put("type", "object").put("properties", JSONObject())
@@ -143,7 +151,8 @@ class ComposioClient @Inject constructor(
                 }
             }.onFailure { Log.w(TAG, "directTools $slug failed", it) }
         }
-        Log.i(TAG, "registered ${out.length()} direct tools from ${toolkits.size} connected app(s)")
+        Log.i(TAG, "registered ${out.length()} direct tools from ${toolkits.size} " +
+            "connected app(s) (<=$perToolkit each)")
         cachedDirect = out
         cachedDirectFor = cacheKey
         out
