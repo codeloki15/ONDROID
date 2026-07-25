@@ -37,6 +37,7 @@ object Routes {
     const val NOTIFY_RULES = "notify_rules"
     const val TRIGGER_HISTORY = "trigger_history"
     const val DASHBOARD = "dashboard"
+    const val TEACH_ROUTINE = "teach_routine"   // teach_routine?name={name}
 }
 
 @Composable
@@ -125,8 +126,25 @@ fun LocalLinkNavGraph(navController: NavHostController) {
         composable(Routes.CONNECT) {
             ConnectScreen(onBack = { navController.popBackStack() })
         }
+        composable(
+            "${Routes.TEACH_ROUTINE}?name={name}",
+            arguments = listOf(navArgument("name") { type = NavType.StringType; defaultValue = "" }),
+        ) { entry ->
+            com.locallink.pro.ui.screens.routines.TeachRoutineScreen(
+                routineName = entry.arguments?.getString("name").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onSaved = { navController.popBackStack() },
+            )
+        }
         composable(Routes.ROUTINES) {
-            RoutinesScreen(onBack = { navController.popBackStack() })
+            RoutinesScreen(
+                onBack = { navController.popBackStack() },
+                onTeach = { name ->
+                    navController.navigate(
+                        "${Routes.TEACH_ROUTINE}?name=" + java.net.URLEncoder.encode(name, "UTF-8"),
+                    )
+                },
+            )
         }
         composable(Routes.MEMORY) {
             MemoryScreen(onBack = { navController.popBackStack() })

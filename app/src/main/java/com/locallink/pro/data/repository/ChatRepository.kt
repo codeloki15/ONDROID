@@ -36,6 +36,7 @@ class ChatRepository @Inject constructor(
     private val experiences: ExperienceStore,
     private val memory: MemoryStore,
     private val deviceTools: com.locallink.pro.service.llm.tools.DeviceToolFastPath,
+    private val teaching: com.locallink.pro.service.pilot.GuidedTeachingSession,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) {
     private companion object { const val TAG = "ChatRepository" }
@@ -80,12 +81,14 @@ class ChatRepository @Inject constructor(
     private fun memoryPilot(
         actuator: PilotActuator,
         askUser: (suspend (String) -> String?)? = null,
+        /** Overrides where a successful run's actions go; defaults to the routine library. */
+        onTrace: (suspend (String, List<com.locallink.pro.service.pilot.TraceStep>) -> Unit)? = null,
     ): MemoryPilot = MemoryPilot(
         reasoner = OpenRouterPilotReasoner(settings),
         actuator = actuator,
         screenshot = { com.locallink.pro.service.pilot.PilotProjectionHolder.capture() },
         find = { task -> experiences.find(task) },
-        save = { task, steps -> experiences.save(task, steps) },
+        save = { task, steps -> (onTrace ?: { t, s -> experiences.save(t, s) })(task, steps) },
         bump = { id -> experiences.bump(id) },
         askUser = askUser,
         summarise = { task -> reportOutcome(task, actuator) },
@@ -408,6 +411,62 @@ class ChatRepository @Inject constructor(
         if (verdict.contains("CHAT", ignoreCase = true)) return false
         if (verdict.contains("ACTION", ignoreCase = true)) return true
         Log.w(TAG, "unclear intent verdict '${verdict.take(40)}' — treating as an action")
+        return true
+    }
+
+    /**
+     * Run ONE instruction of a routine being taught, and keep the actions it produced.
+     *
+     * Teaching runs the real pilot rather than watching the user, so every saved action is one
+     * Omni can perform itself — the reason a demonstration could capture a launcher tap that
+     * could never replay. The user sees each step land before adding the next.
+     *
+     * @return a human report of what that step did, for display beside the instruction.
+     */
+    suspend fun teachStep(instruction: String): Pair<String, Boolean> {
+        val service = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
+            ?: return "Automate is switched off — turn it on to teach a routine." to false
+
+        if (!com.locallink.pro.service.pilot.PilotProjectionHolder.isReady) {
+            com.locallink.pro.service.pilot.PilotProjectionRequest.request()
+        }
+
+        val actions = ArrayList<com.locallink.pro.service.pilot.TraceStep>()
+        var report: String? = null
+        var stopped = false
+        teaching.markRunning(true)
+        try {
+            memoryPilot(
+                service.asActuator(),
+                askUser = { q -> service.requestInput(q, null) },
+                onTrace = { _, steps -> actions.addAll(steps) },
+            ).run(instruction).collect { e ->
+                when (e) {
+                    is AgentEvent.Final ->
+                        if (e.text.startsWith("Stopped")) stopped = true else report = e.text
+                    else -> {}
+                }
+            }
+        } finally {
+            teaching.markRunning(false)
+        }
+
+        val text = report
+            ?: reportOutcome(instruction, service.asActuator())
+            ?: if (stopped) "Couldn't finish that step." else "Finished: $instruction"
+        teaching.addStep(instruction, text, !stopped, actions)
+        return text to !stopped
+    }
+
+    /** Store everything taught so far under the session's name, then end the session. */
+    suspend fun saveTaughtRoutine(): Boolean {
+        val name = teaching.name.value
+        val trace = teaching.trace.value
+        if (name.isBlank() || trace.isEmpty()) return false
+        // Saved through the same store the pilot writes to, so a taught routine is replayed,
+        // listed and scheduled by the existing machinery.
+        experiences.save(name, trace)
+        teaching.clear()
         return true
     }
 

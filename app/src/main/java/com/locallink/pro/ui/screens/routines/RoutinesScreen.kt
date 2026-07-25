@@ -38,6 +38,7 @@ import org.json.JSONArray
 @Composable
 fun RoutinesScreen(
     onBack: () -> Unit,
+    onTeach: (String) -> Unit = {},
     vm: RoutinesViewModel = hiltViewModel(),
 ) {
     val routines by vm.routines.collectAsState()
@@ -49,12 +50,6 @@ fun RoutinesScreen(
     var teaching by remember { mutableStateOf(false) }
     var teachName by remember { mutableStateOf("") }
     var needsA11y by remember { mutableStateOf(false) }
-    val recordedSteps by vm.recordedSteps.collectAsState()
-    val isRecording by vm.isRecording.collectAsState()
-    val pendingName by vm.pendingName.collectAsState()
-    // Derived, never remembered: demonstrating means leaving the app, and Compose state doesn't
-    // survive that — the prompt has to still be there when the user comes back to save.
-    val demonstrating = isRecording || recordedSteps.isNotEmpty()
     val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
@@ -179,25 +174,14 @@ fun RoutinesScreen(
                 TextButton(
                     enabled = teachName.isNotBlank(),
                     onClick = {
-                        if (vm.startTeaching(teachName)) {
-                            teaching = false
-                            // Get out of the way — the demonstration happens in other apps, and
-                            // the floating STOP pill is how the user comes back.
-                            runCatching {
-                                context.startActivity(
-                                    android.content.Intent(android.content.Intent.ACTION_MAIN)
-                                        .addCategory(android.content.Intent.CATEGORY_HOME)
-                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                            }
-                        } else {
-                            // Recording needs the accessibility service; say so instead of
-                            // closing the dialog as though something happened.
-                            teaching = false
-                            needsA11y = true
-                        }
+                        // Omni performs each step itself on the next screen, so teaching no
+                        // longer depends on the accessibility service seeing the user's taps.
+                        val name = teachName
+                        teaching = false
+                        teachName = ""
+                        onTeach(name)
                     },
-                ) { Text("Start recording") }
+                ) { Text("Next") }
             },
             dismissButton = { TextButton(onClick = { teaching = false }) { Text("Cancel") } },
             containerColor = OmniSurface2,
@@ -205,37 +189,7 @@ fun RoutinesScreen(
         )
     }
 
-    // 2/3. Back in the app after demonstrating: review the step count and keep or discard.
-    if (demonstrating) {
-        AlertDialog(
-            onDismissRequest = { },
-            title = { Text("Recording “$teachName”") },
-            text = {
-                Text(
-                    if (recordedSteps.isEmpty())
-                        "Go and do the task on your phone. Tap the floating STOP pill when " +
-                            "you're done, then come back here to save it."
-                    else "Captured ${recordedSteps.size} step" +
-                        (if (recordedSteps.size == 1) "" else "s") +
-                        " so far. Save when the task is complete.",
-                    style = MaterialTheme.typography.bodyMedium, color = OmniTextDim,
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = recordedSteps.isNotEmpty(),
-                    onClick = { vm.finishTeaching(); teachName = "" },
-                ) { Text("Save routine") }
-            },
-            dismissButton = {
-                TextButton(onClick = { vm.cancelTeaching(); teachName = "" }) {
-                    Text("Discard")
-                }
-            },
-            containerColor = OmniSurface2,
-            titleContentColor = OmniText,
-        )
-    }
+
 
     renaming?.let { r ->
         var text by remember(r.id) { mutableStateOf(r.displayName()) }
