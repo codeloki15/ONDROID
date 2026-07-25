@@ -131,6 +131,13 @@ fun SettingsScreen(
                         if (granted) com.locallink.pro.service.call.CallAssistUtil.restart(ctx)
                     }
                     SettingsToggle(
+                        title = "Wake on a repeated \"Hey Omni\"",
+                        subtitle = "If it often misses you, say it twice — costs a little extra battery",
+                        icon = Icons.Outlined.RecordVoiceOver,
+                        checked = uiState.wakeRepeat,
+                        onCheckedChange = viewModel::setWakeRepeat,
+                    )
+                    SettingsToggle(
                         title = "In-call assistant (experimental)",
                         subtitle = "Limited: Android 12+ blocks call audio for apps — full version (dialer mode) coming",
                         icon = Icons.Outlined.Call,

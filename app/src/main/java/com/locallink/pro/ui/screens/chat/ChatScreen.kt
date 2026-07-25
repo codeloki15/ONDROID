@@ -958,15 +958,13 @@ private fun VoiceMode(
         VoicePhase.Paused -> "paused"
     }
 
-    // Typewriter reveal for the AI reply — reads as streaming while it is spoken.
-    var reveal by remember { mutableStateOf(0) }
+    // The reply is now genuinely streamed from the model, so it needs no simulated reveal —
+    // and the old one actively fought the stream: it keyed on aiText and restarted from zero
+    // on every token, so a streaming reply visibly reset over and over. Just follow the text
+    // down as it grows, the way a real transcript does.
+    val replyScroll = rememberScrollState()
     LaunchedEffect(aiText) {
-        if (aiText.isBlank()) { reveal = 0; return@LaunchedEffect }
-        reveal = 0
-        while (reveal < aiText.length) {
-            kotlinx.coroutines.delay(18)
-            reveal = (reveal + 3).coerceAtMost(aiText.length)
-        }
+        if (aiText.isNotBlank()) replyScroll.animateScrollTo(replyScroll.maxValue)
     }
 
     Box(Modifier.fillMaxSize().background(OmniBg)) {
@@ -1033,13 +1031,13 @@ private fun VoiceMode(
                 }
                 if (aiText.isNotBlank() && phase != VoicePhase.Listening) {
                     Text(
-                        aiText.take(reveal),
+                        aiText,
                         style = MaterialTheme.typography.titleMedium,
                         color = OmniText,
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .weight(1f, fill = false)
-                            .verticalScroll(rememberScrollState()),
+                            .verticalScroll(replyScroll),
                     )
                 } else if (userLine.isBlank()) {
                     Text(

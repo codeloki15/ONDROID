@@ -32,6 +32,7 @@ data class SettingsUiState(
     val previewingSpeakerId: Int? = null,
     val handsFree: Boolean = false,
     val callAssist: Boolean = false,
+    val wakeRepeat: Boolean = false,
     val apiKey: String = "",
     val selectedModel: String = SettingsPreferences.DEFAULT_MODEL,
     val models: List<OpenRouterModel> = emptyList(),
@@ -130,6 +131,9 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settingsPreferences.callAssist.collect { c -> _uiState.update { it.copy(callAssist = c) } }
+        }
+        viewModelScope.launch {
+            settingsPreferences.wakeRepeat.collect { w -> _uiState.update { it.copy(wakeRepeat = w) } }
         }
         viewModelScope.launch {
             settingsPreferences.engineMode.collect { m -> _uiState.update { it.copy(engineMode = m) } }
@@ -253,6 +257,11 @@ class SettingsViewModel @Inject constructor(
     fun setCallAssist(enabled: Boolean) {
         _uiState.update { it.copy(callAssist = enabled) }
         settingsPreferences.setCallAssist(enabled)
+    }
+
+    fun setWakeRepeat(enabled: Boolean) {
+        _uiState.update { it.copy(wakeRepeat = enabled) }
+        settingsPreferences.setWakeRepeat(enabled)
     }
 
     fun clearAllChats() {

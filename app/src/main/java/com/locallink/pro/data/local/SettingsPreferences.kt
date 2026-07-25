@@ -58,6 +58,9 @@ class SettingsPreferences(private val context: Context) {
         // In-call assistant (beta): speak on live calls over speakerphone
         private val KEY_CALL_ASSIST = booleanPreferencesKey("call_assist_enabled")
 
+        // Wake word: accept a repeated "Hey Omni" when a single one keeps being missed
+        private val KEY_WAKE_REPEAT = booleanPreferencesKey("wake_repeat_enabled")
+
         // LLM engine mode (cloud / local routing)
         private val KEY_ENGINE_MODE = stringPreferencesKey("engine_mode")
 
@@ -135,6 +138,15 @@ class SettingsPreferences(private val context: Context) {
     val callAssist: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_CALL_ASSIST] ?: false }
     suspend fun loadCallAssist(): Boolean = callAssist.first()
     fun setCallAssist(enabled: Boolean) = editAsync { it[KEY_CALL_ASSIST] = enabled }
+
+    /**
+     * Also wake when "Hey Omni" is said TWICE in quick succession, for voices the strict
+     * threshold keeps missing. Off by default: it runs a second, more sensitive decode pass,
+     * so it costs CPU that most users don't need. See WakeWordEngine.
+     */
+    val wakeRepeat: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_WAKE_REPEAT] ?: false }
+    suspend fun loadWakeRepeat(): Boolean = wakeRepeat.first()
+    fun setWakeRepeat(enabled: Boolean) = editAsync { it[KEY_WAKE_REPEAT] = enabled }
 
     // First-run onboarding
     val onboardingDone: Flow<Boolean> = context.settingsDataStore.data.map { it[KEY_ONBOARDING_DONE] ?: false }
