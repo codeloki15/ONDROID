@@ -31,6 +31,7 @@
     <!-- Hands-free wake-word loop (always-on mic foreground service) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -87,6 +88,12 @@
             android:name=".service.pilot.PilotProjectionService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!-- Holds the Composio realtime socket; only runs while cloud triggers are enabled. -->
+        <service
+            android:name=".service.notify.ComposioTriggerService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <service
             android:name=".service.notify.OmniNotificationListener"

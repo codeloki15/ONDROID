@@ -33,6 +33,7 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var settings: SettingsPreferences
+    @Inject lateinit var notificationRules: com.locallink.pro.data.db.NotificationRuleDao
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -53,6 +54,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Cloud triggers need the realtime socket held open; restore it after a restart or
+        // reboot, but only when the user actually has rules that depend on it.
+        lifecycleScope.launch {
+            val hasCloudRules = runCatching { notificationRules.composioEnabled() }
+                .getOrDefault(emptyList()).isNotEmpty()
+            if (hasCloudRules) {
+                com.locallink.pro.service.notify.ComposioTriggerService.start(this@MainActivity)
+            }
+        }
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(
                 android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT,

@@ -63,6 +63,16 @@ interface NotificationRuleDao {
     @Query("SELECT * FROM notification_rules WHERE enabled = 1 AND triggerType = 'notification'")
     suspend fun enabled(): List<NotificationRuleEntity>
 
+    /**
+     * Rules fired by a Composio cloud trigger. [NotificationRuleEntity.appPackage] holds the
+     * trigger slug (e.g. GMAIL_NEW_GMAIL_MESSAGE) — reusing the column avoids a migration.
+     */
+    @Query("SELECT * FROM notification_rules WHERE enabled = 1 AND triggerType = 'composio'")
+    suspend fun composioEnabled(): List<NotificationRuleEntity>
+
+    @Query("SELECT * FROM notification_rules WHERE triggerType = 'composio'")
+    fun observeComposio(): Flow<List<NotificationRuleEntity>>
+
     @Query("SELECT * FROM notification_rules WHERE id = :id LIMIT 1")
     suspend fun byId(id: Long): NotificationRuleEntity?
 

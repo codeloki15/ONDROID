@@ -55,8 +55,15 @@ import javax.inject.Inject
 class NotificationRulesViewModel @Inject constructor(
     private val dao: NotificationRuleDao,
     private val scheduler: TriggerScheduler,
+    private val composio: com.locallink.pro.service.llm.ComposioClient,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
+
+    /** Cloud trigger types the user's connected apps can fire; empty when Composio is off. */
+    private val _cloudTriggers =
+        MutableStateFlow<List<com.locallink.pro.service.llm.ComposioTriggerType>>(emptyList())
+    val cloudTriggers: StateFlow<List<com.locallink.pro.service.llm.ComposioTriggerType>> =
+        _cloudTriggers.asStateFlow()
     val rules: StateFlow<List<NotificationRuleEntity>> =
         dao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -65,6 +72,9 @@ class NotificationRulesViewModel @Inject constructor(
     val apps: StateFlow<List<String>> = _apps.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            _cloudTriggers.value = runCatching { composio.triggerTypes() }.getOrDefault(emptyList())
+        }
         viewModelScope.launch {
             _apps.value = withContext(Dispatchers.IO) {
                 val pm = appContext.packageManager
@@ -88,6 +98,32 @@ class NotificationRulesViewModel @Inject constructor(
                     createdAt = System.currentTimeMillis(),
                 )
             )
+        }
+
+    /**
+     * Save a cloud-trigger rule AND subscribe to it on Composio — without the subscription the
+     * socket stays connected and simply never receives this event, which looks identical to a
+     * broken rule. The service is (re)started so the connection exists to receive it.
+     */
+    fun addCloudRule(slug: String, isAgent: Boolean, task: String, targetApp: String) =
+        viewModelScope.launch {
+            val instance = composio.enableTrigger(slug)
+            if (instance == null) {
+                android.util.Log.w("NotifyRules", "could not enable cloud trigger $slug")
+                return@launch
+            }
+            dao.upsert(
+                NotificationRuleEntity(
+                    appPackage = slug,              // the trigger slug; see composioEnabled()
+                    matchText = "",
+                    action = if (isAgent) "agent" else "speak",
+                    agentTask = task,
+                    createdAt = System.currentTimeMillis(),
+                    triggerType = "composio",
+                    targetApp = targetApp,
+                )
+            )
+            com.locallink.pro.service.notify.ComposioTriggerService.start(appContext)
         }
 
     fun addTimeRule(hour: Int, minute: Int, note: String, isAgent: Boolean, task: String, targetApp: String) =
@@ -133,6 +169,7 @@ fun NotificationRulesScreen(
 ) {
     val rules by vm.rules.collectAsState()
     val apps by vm.apps.collectAsState()
+    val cloudTriggers by vm.cloudTriggers.collectAsState()
     val context = LocalContext.current
     var hasAccess by remember { mutableStateOf(hasNotificationAccess(context)) }
     var adding by remember { mutableStateOf(false) }
@@ -241,6 +278,10 @@ fun NotificationRulesScreen(
             onSaveTime = { h, m, note, isAgent, task, target ->
                 vm.addTimeRule(h, m, note, isAgent, task, target); adding = false
             },
+            cloudTriggers = cloudTriggers,
+            onSaveCloud = { slug, isAgent, task, target ->
+                vm.addCloudRule(slug, isAgent, task, target); adding = false
+            },
         )
     }
 }
@@ -335,14 +376,21 @@ private fun AppDropdown(
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun AddTriggerDialog(
     apps: List<String>,
     onDismiss: () -> Unit,
     onSaveNotification: (app: String, match: String, isAgent: Boolean, task: String, target: String) -> Unit,
     onSaveTime: (h: Int, m: Int, note: String, isAgent: Boolean, task: String, target: String) -> Unit,
+    cloudTriggers: List<com.locallink.pro.service.llm.ComposioTriggerType>,
+    onSaveCloud: (slug: String, isAgent: Boolean, task: String, target: String) -> Unit,
 ) {
     val context = LocalContext.current
-    var isTime by remember { mutableStateOf(false) }
+    // "notification" | "time" | "cloud"
+    var mode by remember { mutableStateOf("notification") }
+    val isTime = mode == "time"
+    val isCloud = mode == "cloud"
+    var cloudSlug by remember { mutableStateOf("") }
     var app by remember { mutableStateOf("") }
     var match by remember { mutableStateOf("") }
     var hour by remember { mutableStateOf(8) }
@@ -359,13 +407,39 @@ private fun AddTriggerDialog(
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("When…", style = MaterialTheme.typography.labelLarge, color = OmniTextDim)
                 Spacer(Modifier.height(6.dp))
-                Row {
-                    FilterChip(selected = !isTime, onClick = { isTime = false }, label = { Text("Notification") })
-                    Spacer(Modifier.width(8.dp))
-                    FilterChip(selected = isTime, onClick = { isTime = true }, label = { Text("Time (daily)") })
+                // Wraps: three chips overflow a dialog's width on a phone, and the third was
+                // being clipped off-screen entirely.
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(selected = mode == "notification", onClick = { mode = "notification" },
+                        label = { Text("Notification") })
+                    FilterChip(selected = isTime, onClick = { mode = "time" }, label = { Text("Time (daily)") })
+                    FilterChip(selected = isCloud, onClick = { mode = "cloud" }, label = { Text("Cloud app") })
                 }
                 Spacer(Modifier.height(10.dp))
-                if (!isTime) {
+                if (isCloud) {
+                    if (cloudTriggers.isEmpty()) {
+                        Text(
+                            "No cloud triggers available. Connect an app in Settings \u2192 Connected apps first.",
+                            style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                        )
+                    } else {
+                        AppDropdown(
+                            "Cloud event",
+                            cloudTriggers.map { it.slug },
+                            cloudSlug,
+                            allowAny = false,
+                        ) { cloudSlug = it }
+                        cloudTriggers.firstOrNull { it.slug == cloudSlug }?.let { t ->
+                            Text(
+                                t.description.ifBlank { t.name },
+                                style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                    }
+                } else if (!isTime) {
                     AppDropdown("From app", apps, app, allowAny = true) { app = it }
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
@@ -401,7 +475,7 @@ private fun AddTriggerDialog(
                     Spacer(Modifier.width(8.dp))
                     FilterChip(selected = isAgent, onClick = { isAgent = true }, label = { Text("Run a task") })
                 }
-                if (!isAgent && !isTime) {
+                if (!isAgent && mode == "notification") {
                     Text(
                         "Says only “You have a notification from <app>” — content stays private.",
                         style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
@@ -424,10 +498,13 @@ private fun AddTriggerDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (isTime) onSaveTime(hour, minute, note, isAgent, task, target)
-                    else onSaveNotification(app, match, isAgent, task, target)
+                    when (mode) {
+                        "time" -> onSaveTime(hour, minute, note, isAgent, task, target)
+                        "cloud" -> onSaveCloud(cloudSlug, isAgent, task, target)
+                        else -> onSaveNotification(app, match, isAgent, task, target)
+                    }
                 },
-                enabled = !isAgent || task.isNotBlank(),
+                enabled = (!isAgent || task.isNotBlank()) && (!isCloud || cloudSlug.isNotBlank()),
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
