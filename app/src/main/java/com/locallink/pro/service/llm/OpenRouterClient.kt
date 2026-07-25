@@ -155,7 +155,7 @@ class OpenRouterClient @Inject constructor(
         // call them in ONE hop instead of SEARCH → GET_SCHEMAS → MULTI_EXECUTE. The meta-tools
         // stay registered below as the fallback for anything outside this set.
         val directTools = if (mcp.isEnabled()) {
-            runCatching { rest.directToolSchemas() }.getOrDefault(JSONArray())
+            runCatching { rest.directToolSchemas(userText) }.getOrDefault(JSONArray())
         } else JSONArray()
         val directNames = buildSet {
             for (i in 0 until directTools.length()) {
