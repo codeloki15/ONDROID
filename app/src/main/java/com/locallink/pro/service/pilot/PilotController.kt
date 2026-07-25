@@ -137,7 +137,7 @@ class PilotController(
             // same tap because the old screen was still showing. App launches are the slowest
             // transition (cold starts, splash screens) and get extra time.
             if (ok && action.changesScreen()) {
-                kotlinx.coroutines.delay(if (action is PilotAction.LaunchApp) LAUNCH_SETTLE_MS else SETTLE_MS)
+                settle(if (action is PilotAction.LaunchApp) LAUNCH_SETTLE_MS else SETTLE_MS)
             }
             // Outcome-annotated note (pi lesson: results carry verdict + post-state, never a
             // bare "tapped X"): tell the model where the action LANDED, or that it did nothing.
@@ -172,6 +172,32 @@ class PilotController(
         target.text?.takeIf { it.isNotBlank() }?.let { t -> fresh.firstOrNull { it.text == t }?.let { return it } }
         target.desc?.takeIf { it.isNotBlank() }?.let { d -> fresh.firstOrNull { it.desc == d }?.let { return it } }
         return null
+    }
+
+    /**
+     * Wait for the screen to stop changing, giving up after [ceilingMs].
+     *
+     * These waits used to be flat sleeps — 700ms after every action, 1600ms after a launch —
+     * paid in full even when the screen had already settled in 150ms. Over a 20-step routine
+     * that is around ten seconds of doing nothing. The accessibility service already receives
+     * window-state and content-change events, so we can watch for quiet instead: poll until the
+     * UI has been still for [QUIET_MS], and treat the old fixed values as an upper bound.
+     *
+     * Degrades safely — if no events arrive at all (service down, screen genuinely static) this
+     * waits the ceiling, exactly the old behaviour.
+     */
+    private suspend fun settle(ceilingMs: Long) {
+        val service = OmniAccessibilityService.instance
+            ?: return kotlinx.coroutines.delay(ceilingMs)
+        val deadline = android.os.SystemClock.uptimeMillis() + ceilingMs
+        // Floor: the action's own events may not have landed yet, so never conclude "quiet"
+        // before the screen has had a chance to start reacting.
+        kotlinx.coroutines.delay(SETTLE_FLOOR_MS)
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val quietFor = android.os.SystemClock.uptimeMillis() - service.lastUiChangeAt
+            if (quietFor >= QUIET_MS) return
+            kotlinx.coroutines.delay(POLL_MS)
+        }
     }
 
     /** Perform one non-terminal action; returns (success, human note for history/UI). */
@@ -261,8 +287,12 @@ class PilotController(
     }
 
     private companion object {
+        // Upper bounds now, not fixed sleeps — see settle().
         const val SETTLE_MS = 700L
         const val LAUNCH_SETTLE_MS = 1600L  // app launches need splash/cold-start time
+        private const val SETTLE_FLOOR_MS = 120L // let the action's own events land first
+        private const val QUIET_MS = 180L        // no UI change for this long ⇒ screen has settled
+        private const val POLL_MS = 40L
         const val MAX_TRACE_STEPS = 15      // longer flows are too fragile to replay verbatim
         const val HISTORY_WINDOW = 30       // reasoner sees the last N action notes verbatim
     }

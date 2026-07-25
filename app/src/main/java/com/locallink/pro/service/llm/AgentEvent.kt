@@ -2,7 +2,10 @@ package com.locallink.pro.service.llm
 
 /** Events emitted by [AgentOrchestrator] as it runs the chat + tool loop. */
 sealed interface AgentEvent {
-    /** A partial chunk of the assistant's natural-language reply (for live streaming UI). */
+    /**
+     * An incremental chunk of the assistant's reply — a DELTA, not a snapshot. Consumers must
+     * append it to what they've already received; the accumulated text is closed out by [Final].
+     */
     data class Token(val text: String) : AgentEvent
 
     /** The model requested a tool. [readOnly] tools auto-run; others await confirmation. */

@@ -44,6 +44,8 @@ class VoiceLoopController @Inject constructor(
         private const val TAG = "VoiceLoop"
         private const val HANDOFF_MS = 250L // guard between mic owners (native release is slow)
         private const val MAX_SILENCES = 2  // empty/timeout captures before dropping to wake word
+        private const val SPEECH_START_MS = 2_500L  // grace for the first queued utterance to begin
+        private const val SPEECH_MAX_MS = 90_000L   // ceiling on waiting out a long spoken reply
         // Phrases that end the active conversation (back to wake-word idle).
         private val STOP_PHRASES = setOf("stop", "stop listening", "goodbye", "bye omni", "that's all", "thats all", "exit", "cancel")
     }
@@ -149,16 +151,30 @@ class VoiceLoopController @Inject constructor(
         val myTurn = ++turnId
         scope.launch {
             try {
-                // Hand the task to the AUTOMATE agent (plans, replays learned routines, drives
-                // the phone) and bring the app to the foreground so the user watches it work.
-                openApp()
-                chat.runAgent(text)
-                if (myTurn != turnId) return@launch
-                svc?.hideTranscript()
-                voice.speak("On it.")
-                // The agent runs in the accessibility service's scope; return to wake-word
-                // listening so "Hey Omni" keeps working (the mic stays free for the next call).
-                kotlinx.coroutines.delay(1500)
+                // Spoken input carries no mode, so decide what this turn actually is. A question
+                // gets answered and spoken; only a real instruction is worth foregrounding the
+                // app and running the agent for.
+                if (chat.isPhoneAction(text)) {
+                    // Hand the task to the AUTOMATE agent (plans, replays learned routines, drives
+                    // the phone) and bring the app to the foreground so the user watches it work.
+                    openApp()
+                    chat.runAgent(text)
+                    if (myTurn != turnId) return@launch
+                    svc?.hideTranscript()
+                    voice.speak("On it.")
+                } else {
+                    // Answer in place: no app switch, no pilot. Composio tools still work here.
+                    chat.runChatWithTools(text, isVoice = true)
+                    if (myTurn != turnId) return@launch
+                    svc?.hideTranscript()
+                    chat.lastAssistantReply.value
+                        .takeIf { it.isNotBlank() }
+                        ?.let { voice.speak(it) }
+                }
+                // Return to wake-word listening so "Hey Omni" keeps working — but not before TTS
+                // finishes: the mic is single-owner, and reopening it under a live utterance is
+                // what produces ERROR_NO_MATCH. A spoken answer can run far past the old fixed wait.
+                awaitSpeechEnd()
                 if (myTurn == turnId) enterWakeListening()
             } catch (e: Exception) {
                 Log.e(TAG, "turn failed", e)
@@ -166,6 +182,17 @@ class VoiceLoopController @Inject constructor(
                 if (myTurn == turnId) enterWakeListening()
             }
         }
+    }
+
+    /**
+     * Block until TTS has finished (or [SPEECH_MAX_MS] elapses), so the mic is genuinely free
+     * before the wake engine reclaims it. Speech is queued sentence-by-sentence, so allow a
+     * moment for the first utterance to start before concluding nothing is being said.
+     */
+    private suspend fun awaitSpeechEnd() {
+        withTimeoutOrNull(SPEECH_START_MS) { voice.isSpeaking.first { it } }
+        withTimeoutOrNull(SPEECH_MAX_MS) { voice.isSpeaking.first { !it } }
+        kotlinx.coroutines.delay(HANDOFF_MS)
     }
 
     /** Bring OmniPro to the foreground (best-effort) so the hands-free task is visible. */

@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExperienceStoreTest {
@@ -69,5 +70,65 @@ class ExperienceStoreTest {
         store.save("Check battery\n[Progress so far: opened settings]", steps)
         assertNotNull("same task with different run context must match",
             store.find("Check battery\n[Progress so far: something else entirely]"))
+    }
+
+    // ── Near-miss recall: routines that don't replay should still inform the planner ──
+
+    @Test fun aNearMissRoutineIsOfferedAsAnExample() = runTest {
+        val store = ExperienceStore(FakeDao())
+        store.save("Open battery settings", listOf(
+            TraceStep("launch_app", "settings"),
+            TraceStep("tap", targetText = "Battery"),
+        ))
+
+        // Different enough that find() won't replay it...
+        assertNull(store.find("Open battery saver settings and enable it"))
+        // ...but close enough to be worth showing the planner.
+        val similar = store.similar("Open battery saver settings and enable it")
+        assertEquals(1, similar.size)
+        assertEquals("Open battery settings", similar[0].label)
+    }
+
+    @Test fun unrelatedRoutinesAreNotOfferedAsExamples() = runTest {
+        val store = ExperienceStore(FakeDao())
+        store.save("Open battery settings", listOf(TraceStep("launch_app", "settings")))
+        assertEquals(emptyList<SimilarRoutine>(), store.similar("Send a birthday message to Priya"))
+    }
+
+    @Test fun theClosestRoutineIsOfferedFirst() = runTest {
+        val store = ExperienceStore(FakeDao())
+        store.save("Play music on Spotify", listOf(TraceStep("launch_app", "spotify")))
+        store.save("Play music on YouTube", listOf(TraceStep("launch_app", "youtube")))
+
+        // Shares three content words with the Spotify routine, two with the YouTube one.
+        assertEquals("Play music on Spotify", store.similar("Play music on Spotify again").first().label)
+    }
+
+    @Test fun equalOverlapPrefersTheMoreProvenRoutine() = runTest {
+        val store = ExperienceStore(FakeDao())
+        store.save("Play music on YouTube", listOf(TraceStep("launch_app", "youtube")))
+        store.save("Play music on Spotify", listOf(TraceStep("launch_app", "spotify")))
+        // Both overlap "Play music on Pandora" equally — the one that has worked more often wins.
+        val spotify = store.find("Play music on Spotify")!!
+        repeat(3) { store.bump(spotify.id) }
+
+        assertEquals("Play music on Spotify", store.similar("Play music on Pandora").first().label)
+    }
+
+    @Test fun promptBlockIsEmptyWhenNothingIsClose() = runTest {
+        val store = ExperienceStore(FakeDao())
+        store.save("Open battery settings", listOf(TraceStep("launch_app", "settings")))
+        assertEquals("", store.priorRoutinesBlock("Send a birthday message to Priya"))
+    }
+
+    @Test fun promptBlockNamesTheRoutineAndItsSteps() = runTest {
+        val store = ExperienceStore(FakeDao())
+        store.save("Open battery settings", listOf(
+            TraceStep("launch_app", "settings"),
+            TraceStep("tap", targetText = "Battery"),
+        ))
+        val block = store.priorRoutinesBlock("Open battery saver settings and enable it")
+        assertTrue("should name the routine: $block", block.contains("Open battery settings"))
+        assertTrue("should show its steps: $block", block.contains("Battery"))
     }
 }

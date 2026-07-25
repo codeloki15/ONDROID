@@ -21,9 +21,14 @@ class PlanExecutor(
     private val cancelled: () -> Boolean = { false },
     /** Short description of what's on screen right now — grounds replans in reality. */
     private val screenSummary: suspend () -> String = { "" },
+    /**
+     * Routines already learned on this device that resemble the task, as prompt text. Gives the
+     * planner worked examples from THIS phone instead of planning every near-miss from scratch.
+     */
+    private val priorRoutines: suspend (String) -> String = { "" },
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
-        var plan = planner.plan(task, "")
+        var plan = planner.plan(task, priorRoutines(task))
         emit(AgentEvent.Plan(plan.todos))
         val done = ArrayList<String>()
         var steps = 0

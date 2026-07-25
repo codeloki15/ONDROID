@@ -43,6 +43,7 @@ class OpenRouterUnavailable(val reason: String, cause: Throwable? = null) : Exce
 @Singleton
 class OpenRouterClient @Inject constructor(
     private val mcp: ComposioMcpClient,
+    private val rest: ComposioClient,
     private val settings: SettingsPreferences,
     private val memory: com.locallink.pro.data.repository.MemoryStore,
 ) {
@@ -149,6 +150,19 @@ class OpenRouterClient @Inject constructor(
         // tools, connect apps in-chat, and execute — driving the whole flow itself.
         // metaToolSchemas() also creates the session, which populates mcp.assistivePrompt.
         val metaTools = if (mcp.isEnabled()) mcp.metaToolSchemas() else JSONArray()
+
+        // Tools for apps the user has already connected, registered natively so the model can
+        // call them in ONE hop instead of SEARCH → GET_SCHEMAS → MULTI_EXECUTE. The meta-tools
+        // stay registered below as the fallback for anything outside this set.
+        val directTools = if (mcp.isEnabled()) {
+            runCatching { rest.directToolSchemas() }.getOrDefault(JSONArray())
+        } else JSONArray()
+        val directNames = buildSet {
+            for (i in 0 until directTools.length()) {
+                directTools.optJSONObject(i)?.optJSONObject("function")
+                    ?.optString("name")?.takeIf { it.isNotBlank() }?.let { add(it) }
+            }
+        }
         // One stable Tool Router session id for this whole run. The model previously invented a
         // fresh id every hop ("able", "bite"), so Tool Router lost state between steps. Pinning it
         // here and telling the model to reuse it keeps search→schema→execute on one session.
@@ -157,6 +171,15 @@ class OpenRouterClient @Inject constructor(
         val sys = buildString {
             append(SYSTEM)
             append(userFacts)
+            if (directNames.isNotEmpty()) {
+                // Overrides rule 1 of SYSTEM for exactly these names — they are pre-registered
+                // from the user's connected accounts, so discovery would be wasted round trips.
+                append("\n\n# Already-connected app tools\n")
+                append("These tools are registered and callable DIRECTLY, by name, right now — ")
+                append("do NOT run COMPOSIO_SEARCH_TOOLS or COMPOSIO_MULTI_EXECUTE_TOOL for them:\n")
+                append(directNames.joinToString(", "))
+                append("\nUse the meta-tools only for something not in that list.")
+            }
             if (metaTools.length() > 0) {
                 // Composio's OWN guidance — it spells out the exact protocol (SEARCH_TOOLS first,
                 // include a properly-formed `arguments` field matching the schema, never pass
@@ -198,16 +221,21 @@ class OpenRouterClient @Inject constructor(
                 .put("model", model)
                 .put("messages", messages)
                 .put("temperature", 0.6)
-            if (metaTools.length() > 0) body.put("tools", metaTools).put("tool_choice", "auto")
+            // Direct (pre-registered) tools first, meta-tools after as the discovery fallback.
+            val allTools = JSONArray()
+            for (i in 0 until directTools.length()) allTools.put(directTools.get(i))
+            for (i in 0 until metaTools.length()) allTools.put(metaTools.get(i))
+            if (allTools.length() > 0) body.put("tools", allTools).put("tool_choice", "auto")
 
             // Throws OpenRouterUnavailable on rate-limit/quota/auth/server/network errors,
             // which ChatRepository catches to fall back to the on-device model.
-            val respMsg = postChat(key, body)
+            // Streamed: content fragments surface as Token events the moment they arrive.
+            val respMsg = postChatStreaming(key, body) { piece -> emit(AgentEvent.Token(piece)) }
 
             val toolCalls = respMsg.optJSONArray("tool_calls")
             if (toolCalls == null || toolCalls.length() == 0) {
+                // Tokens were already emitted above as they streamed — only close the turn.
                 val content = respMsg.optString("content").ifBlank { "(no reply)" }
-                emit(AgentEvent.Token(content))
                 emit(AgentEvent.Final(content))
                 return@flow
             }
@@ -231,6 +259,25 @@ class OpenRouterClient @Inject constructor(
                 }
 
                 emit(AgentEvent.ToolCall(id, name, args.toString(), true))
+
+                // A pre-registered tool from a connected app: run it straight over REST. This is
+                // the whole point of registering them — no discovery hops, no meta-tool wrapper.
+                if (name in directNames) {
+                    val res = runCatching { rest.execute(name, args) }
+                        .getOrElse { JSONObject().put("error", it.message ?: "execute failed").toString() }
+                    val failed = looksLikeToolError(res)
+                    emit(AgentEvent.ToolResult(id, name, res, !failed))
+                    messages.put(
+                        JSONObject().put("role", "tool").put("tool_call_id", id)
+                            .put("name", name).put(
+                                "content",
+                                if (failed) "$res\n\n[That call FAILED. Read the error, correct " +
+                                    "your arguments, and retry — do not repeat the identical call.]"
+                                else res,
+                            ),
+                    )
+                    continue
+                }
 
                 // Fix #3 guard: reject invented tool names locally instead of paying a round-trip
                 // to get MCP -32602. Steer the model back to the meta-tool protocol.
@@ -274,6 +321,107 @@ class OpenRouterClient @Inject constructor(
         emit(AgentEvent.Final("(Stopped after $MAX_HOPS tool steps.)"))
     }.flowOn(Dispatchers.IO)
 
+    /** Accumulates one streamed tool call: id/name arrive once, arguments in fragments. */
+    private class ToolCallBuilder {
+        var id: String = ""
+        var name: String = ""
+        val args = StringBuilder()
+    }
+
+    /**
+     * POST a chat turn with `stream: true` and consume the SSE response, invoking [onDelta]
+     * for each content fragment as it arrives. Returns the fully assembled assistant message
+     * in the same shape [postChat] returns, so the tool-calling loop is unchanged.
+     *
+     * This is what makes replies appear (and start being spoken) while the model is still
+     * generating, instead of after the entire response has been produced.
+     */
+    private suspend fun postChatStreaming(
+        key: String,
+        body: JSONObject,
+        onDelta: suspend (String) -> Unit,
+    ): JSONObject {
+        val streamBody = JSONObject(body.toString()).put("stream", true)
+        val resp = try {
+            val req = authed(Request.Builder().url(CHAT_URL), key)
+                .post(streamBody.toString().toRequestBody(json))
+                .build()
+            http.newCall(req).execute()
+        } catch (e: Exception) {
+            Log.e(TAG, "postChatStreaming network error", e)
+            throw OpenRouterUnavailable("network error", e)
+        }
+
+        resp.use { response ->
+            if (!response.isSuccessful) {
+                val errText = response.body?.string().orEmpty()
+                Log.e(TAG, "OpenRouter ${response.code}: ${errText.take(300)}")
+                throw OpenRouterUnavailable(reasonFor(response.code, errText))
+            }
+            val source = response.body?.source() ?: throw OpenRouterUnavailable("empty response")
+
+            val content = StringBuilder()
+            val calls = sortedMapOf<Int, ToolCallBuilder>()
+
+            while (true) {
+                val line = source.readUtf8Line() ?: break
+                if (!line.startsWith("data:")) continue          // comments/keep-alives
+                val payload = line.removePrefix("data:").trim()
+                if (payload == "[DONE]") break
+                val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                // OpenRouter reports mid-stream failures as a top-level error object.
+                chunk.optJSONObject("error")?.let { err ->
+                    throw OpenRouterUnavailable(err.optString("message").ifBlank { "stream error" })
+                }
+                val delta = chunk.optJSONArray("choices")
+                    ?.optJSONObject(0)?.optJSONObject("delta") ?: continue
+
+                val piece = delta.optString("content")
+                if (piece.isNotEmpty()) {
+                    content.append(piece)
+                    onDelta(piece)
+                }
+
+                delta.optJSONArray("tool_calls")?.let { tcs ->
+                    for (i in 0 until tcs.length()) {
+                        val tc = tcs.optJSONObject(i) ?: continue
+                        val builder = calls.getOrPut(tc.optInt("index", i)) { ToolCallBuilder() }
+                        tc.optString("id").let { if (it.isNotBlank()) builder.id = it }
+                        tc.optJSONObject("function")?.let { fn ->
+                            fn.optString("name").let { if (it.isNotBlank()) builder.name = it }
+                            builder.args.append(fn.optString("arguments"))
+                        }
+                    }
+                }
+            }
+
+            val msg = JSONObject().put("role", "assistant").put("content", content.toString())
+            if (calls.isNotEmpty()) {
+                val arr = JSONArray()
+                for (builder in calls.values) {
+                    arr.put(
+                        JSONObject()
+                            .put("id", builder.id)
+                            .put("type", "function")
+                            .put("function", JSONObject()
+                                .put("name", builder.name)
+                                .put("arguments", builder.args.toString())),
+                    )
+                }
+                msg.put("tool_calls", arr)
+            }
+            return msg
+        }
+    }
+
+    private fun reasonFor(code: Int, text: String): String = when (code) {
+        429 -> "rate limited"
+        402 -> "out of credits"
+        401, 403 -> "auth error"
+        in 500..599 -> "server error $code"
+        else -> "HTTP $code: ${shortErr(text)}"
+    }
+
     /**
      * POST a chat turn. Returns the assistant message on success.
      * Throws [OpenRouterUnavailable] on rate-limit (429), quota/payment (402), auth (401/403),
@@ -293,20 +441,41 @@ class OpenRouterClient @Inject constructor(
             val text = it.body?.string().orEmpty()
             if (!it.isSuccessful) {
                 Log.e(TAG, "OpenRouter ${it.code}: ${text.take(300)}")
-                val reason = when (it.code) {
-                    429 -> "rate limited"
-                    402 -> "out of credits"
-                    401, 403 -> "auth error"
-                    in 500..599 -> "server error ${it.code}"
-                    else -> "HTTP ${it.code}: ${shortErr(text)}"
-                }
                 // Treat the recoverable classes as "fall back to local"; surface others too
                 // (a 400 etc. is unlikely to differ on retry, but local is still better than nothing).
-                throw OpenRouterUnavailable(reason)
+                throw OpenRouterUnavailable(reasonFor(it.code, text))
             }
             return JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
                 ?: throw OpenRouterUnavailable("empty response")
         }
+    }
+
+    /**
+     * ONE tool-calling turn against an arbitrary local tool set — no Composio, no hop loop.
+     * Returns the raw assistant message (which may or may not contain `tool_calls`), or null if
+     * there's no key or the call fails. Temperature 0: this is routing, not prose.
+     *
+     * Used by the device-tool fast path, where the whole point is a single round trip.
+     */
+    suspend fun singleToolTurn(
+        system: String,
+        user: String,
+        tools: JSONArray,
+    ): JSONObject? = withContext(Dispatchers.IO) {
+        val key = settings.loadOpenRouterApiKey()
+        if (key.isBlank()) return@withContext null
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", system))
+            .put(JSONObject().put("role", "user").put("content", user))
+        val body = JSONObject()
+            .put("model", settings.loadOpenRouterModel())
+            .put("messages", messages)
+            .put("temperature", 0.0)
+            .put("tools", tools)
+            .put("tool_choice", "auto")
+        runCatching { postChat(key, body) }
+            .onFailure { Log.w(TAG, "singleToolTurn failed: ${it.message}") }
+            .getOrNull()
     }
 
     /**

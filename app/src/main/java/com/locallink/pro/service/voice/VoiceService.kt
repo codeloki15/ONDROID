@@ -327,6 +327,24 @@ class VoiceService @Inject constructor(
     }
 
     /**
+     * Queue one sentence of a reply that is still streaming, WITHOUT cutting off what's
+     * already speaking. Calling this per completed sentence lets speech begin as soon as
+     * the model has produced its first sentence instead of waiting for the whole reply.
+     */
+    fun enqueueSpeech(text: String) {
+        val cleanText = stripMarkdown(text)
+        if (cleanText.isBlank()) return
+        if (kokoroTts.isReady.value) {
+            kokoroTts.enqueue(cleanText)
+        } else if (androidTtsReady) {
+            // QUEUE_ADD already appends rather than replacing.
+            androidTts?.speak(cleanText, TextToSpeech.QUEUE_ADD, null, UUID.randomUUID().toString())
+        } else {
+            Log.w(TAG, "No TTS engine ready")
+        }
+    }
+
+    /**
      * Strip markdown formatting from text to make it TTS-friendly.
      * Removes **, __, *, _, `, #, -, etc. while keeping the actual content.
      */

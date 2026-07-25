@@ -36,6 +36,7 @@ object Routes {
     const val MEMORY = "memory"
     const val NOTIFY_RULES = "notify_rules"
     const val TRIGGER_HISTORY = "trigger_history"
+    const val DASHBOARD = "dashboard"
 }
 
 @Composable
@@ -82,6 +83,15 @@ fun LocalLinkNavGraph(navController: NavHostController) {
                     navController.navigate("${Routes.CHAT}?sessionId=&mode=auto")
                 },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenDashboard = { navController.navigate(Routes.DASHBOARD) },
+            )
+        }
+        composable(Routes.DASHBOARD) {
+            com.locallink.pro.ui.screens.dashboard.DashboardScreen(
+                onBack = { navController.popBackStack() },
+                onOpenSession = { id ->
+                    navController.navigate("${Routes.CHAT}?sessionId=$id&mode=auto")
+                },
             )
         }
         composable(
