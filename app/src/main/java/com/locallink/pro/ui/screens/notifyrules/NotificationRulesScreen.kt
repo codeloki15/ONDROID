@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Alarm
+import androidx.compose.material.icons.outlined.CloudQueue
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.NotificationsActive
@@ -58,6 +59,11 @@ class NotificationRulesViewModel @Inject constructor(
     private val composio: com.locallink.pro.service.llm.ComposioClient,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
+
+    /** Surfaced when arming a cloud trigger fails, so the tap isn't silently ignored. */
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+    fun clearError() { _error.value = null }
 
     /** Cloud trigger types the user's connected apps can fire; empty when Composio is off. */
     private val _cloudTriggers =
@@ -109,7 +115,11 @@ class NotificationRulesViewModel @Inject constructor(
         viewModelScope.launch {
             val instance = composio.enableTrigger(slug)
             if (instance == null) {
+                // Some events need per-trigger configuration (a channel, a sheet, a label) that
+                // this dialog doesn't collect. Say so instead of saving a rule that can't fire.
                 android.util.Log.w("NotifyRules", "could not enable cloud trigger $slug")
+                _error.value = "Couldn't switch on ${cloudLabelOf(slug)}. It may need extra setup " +
+                    "in your Composio dashboard, or the app may need reconnecting."
                 return@launch
             }
             dao.upsert(
@@ -170,6 +180,7 @@ fun NotificationRulesScreen(
     val rules by vm.rules.collectAsState()
     val apps by vm.apps.collectAsState()
     val cloudTriggers by vm.cloudTriggers.collectAsState()
+    val error by vm.error.collectAsState()
     val context = LocalContext.current
     var hasAccess by remember { mutableStateOf(hasNotificationAccess(context)) }
     var adding by remember { mutableStateOf(false) }
@@ -268,6 +279,17 @@ fun NotificationRulesScreen(
         }
     }
 
+    error?.let { message ->
+        AlertDialog(
+            onDismissRequest = vm::clearError,
+            title = { Text("Couldn't arm that trigger") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = vm::clearError) { Text("OK") } },
+            containerColor = OmniSurface2,
+            titleContentColor = OmniText,
+        )
+    }
+
     if (adding) {
         AddTriggerDialog(
             apps = apps,
@@ -303,17 +325,26 @@ private fun RuleRow(
     ) {
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (r.triggerType == "time") {
-                    Icon(Icons.Outlined.Alarm, null, tint = OmniTextDim, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(5.dp))
+                when (r.triggerType) {
+                    "time" -> {
+                        Icon(Icons.Outlined.Alarm, null, tint = OmniTextDim, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    "composio" -> {
+                        Icon(Icons.Outlined.CloudQueue, null, tint = OmniTextDim, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(5.dp))
+                    }
                 }
                 Text(
-                    if (r.triggerType == "time")
-                        "Daily %02d:%02d".format(r.timeHour, r.timeMinute) +
+                    when (r.triggerType) {
+                        "time" -> "Daily %02d:%02d".format(r.timeHour, r.timeMinute) +
                             (r.matchText.takeIf { it.isNotBlank() }?.let { " · “$it”" } ?: "")
-                    else buildString {
-                        append(r.appPackage.ifBlank { "Any app" })
-                        if (r.matchText.isNotBlank()) append(" · contains “${r.matchText}”")
+                        // appPackage holds the trigger slug — read it back the way the picker showed it.
+                        "composio" -> cloudLabelOf(r.appPackage)
+                        else -> buildString {
+                            append(r.appPackage.ifBlank { "Any app" })
+                            if (r.matchText.isNotBlank()) append(" · contains “${r.matchText}”")
+                        }
                     },
                     style = MaterialTheme.typography.titleSmall, color = OmniText,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -391,6 +422,7 @@ private fun AddTriggerDialog(
     val isTime = mode == "time"
     val isCloud = mode == "cloud"
     var cloudSlug by remember { mutableStateOf("") }
+    var pickingCloud by remember { mutableStateOf(false) }
     var app by remember { mutableStateOf("") }
     var match by remember { mutableStateOf("") }
     var hour by remember { mutableStateOf(8) }
@@ -399,6 +431,14 @@ private fun AddTriggerDialog(
     var isAgent by remember { mutableStateOf(false) }
     var task by remember { mutableStateOf("") }
     var target by remember { mutableStateOf("") }
+
+    if (pickingCloud) {
+        CloudTriggerPicker(
+            triggers = cloudTriggers,
+            onPick = { cloudSlug = it.slug; pickingCloud = false },
+            onDismiss = { pickingCloud = false },
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -419,26 +459,26 @@ private fun AddTriggerDialog(
                 }
                 Spacer(Modifier.height(10.dp))
                 if (isCloud) {
-                    if (cloudTriggers.isEmpty()) {
-                        Text(
-                            "No cloud triggers available. Connect an app in Settings \u2192 Connected apps first.",
-                            style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
-                        )
-                    } else {
-                        AppDropdown(
-                            "Cloud event",
-                            cloudTriggers.map { it.slug },
-                            cloudSlug,
-                            allowAny = false,
-                        ) { cloudSlug = it }
-                        cloudTriggers.firstOrNull { it.slug == cloudSlug }?.let { t ->
-                            Text(
-                                t.description.ifBlank { t.name },
-                                style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
-                                modifier = Modifier.padding(top = 6.dp),
-                            )
-                        }
-                    }
+                    val chosen = cloudTriggers.firstOrNull { it.slug == cloudSlug }
+                    OutlinedTextField(
+                        value = chosen?.let { "${appLabelOf(it.toolkit)} · ${it.label()}" }.orEmpty(),
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("When this happens") },
+                        placeholder = { Text("Choose a cloud event") },
+                        trailingIcon = {
+                            TextButton(onClick = { pickingCloud = true }) {
+                                Text(if (chosen == null) "Choose" else "Change")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        chosen?.description?.takeIf { it.isNotBlank() }
+                            ?: "Events come from the apps you've connected — Omni reacts the moment one fires.",
+                        style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
                 } else if (!isTime) {
                     AppDropdown("From app", apps, app, allowAny = true) { app = it }
                     Spacer(Modifier.height(8.dp))
