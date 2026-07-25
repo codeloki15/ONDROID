@@ -27,6 +27,15 @@ class MemoryPilot(
     private val bump: suspend (Long) -> Unit,
     /** Live mid-run question channel (input floater); null → asks end the run. */
     private val askUser: (suspend (String) -> String?)? = null,
+    /**
+     * Turns the screen a finished replay landed on into a report of what was achieved.
+     *
+     * A replay used to end with "Done — replayed a routine I learned earlier", which says what
+     * the mechanism did and nothing about the task: a routine that looks up a price reported no
+     * price. The reasoning path already reports concretely because the model writes its own
+     * done(result); this gives the deterministic path the same courtesy.
+     */
+    private val summarise: (suspend (String) -> String?)? = null,
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
         var primed: List<String> = emptyList()
@@ -41,7 +50,10 @@ class MemoryPilot(
             if (outcome.fullSuccess) {
                 runCatching { bump(exp.id) }
                 emit(AgentEvent.ToolResult(id, "replay_routine", "replayed ${exp.steps.size} learned steps", true))
-                emit(AgentEvent.Final("Done — replayed a routine I learned earlier (no guessing)."))
+                val report = runCatching { summarise?.invoke(task) }.getOrNull()?.takeIf { it.isNotBlank() }
+                emit(AgentEvent.Final(
+                    report ?: "Replayed the ${exp.steps.size}-step routine I learned for this.",
+                ))
                 return@flow
             }
             if (outcome.executedNotes.isNotEmpty()) {

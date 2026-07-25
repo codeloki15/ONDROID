@@ -88,7 +88,32 @@ class ChatRepository @Inject constructor(
         save = { task, steps -> experiences.save(task, steps) },
         bump = { id -> experiences.bump(id) },
         askUser = askUser,
+        summarise = { task -> reportOutcome(task, actuator) },
     )
+
+    /**
+     * Say what an automation actually achieved, reading it off the screen it finished on.
+     *
+     * "Done." tells the user nothing — if they asked for a price, the price is the answer, and
+     * it's sitting right there on the final screen. Returns null on any failure so the caller
+     * falls back to its own wording rather than the run appearing to fail.
+     */
+    private suspend fun reportOutcome(task: String, actuator: PilotActuator): String? {
+        val screen = runCatching { screenSummaryOf(actuator)() }.getOrDefault("")
+        if (screen.isBlank()) return null
+        val reply = runCatching {
+            openRouter.plainChat(
+                "A phone automation just finished. Report to the user what was achieved, in one " +
+                    "or two sentences, in plain past tense.\n" +
+                    "Quote the CONCRETE values that answer the request — prices, names, times, " +
+                    "counts — exactly as they appear. Never reply with just \"Done\".\n" +
+                    "If the screen doesn't show what was asked for, say plainly what it does show.\n\n" +
+                    "Task: $task\n" +
+                    "Final screen: $screen",
+            )
+        }.getOrDefault("")
+        return reply.takeIf { it.isNotBlank() }
+    }
 
     /** A short "what's on screen" line for grounding replans. */
     private fun screenSummaryOf(actuator: PilotActuator): suspend () -> String = {
@@ -527,7 +552,12 @@ class ChatRepository @Inject constructor(
                         else -> {}
                     }
                 }
-                return if (stuck) null else (report ?: "Done.")
+                if (stuck) return null
+                // A bare "Done." is the one answer that's never useful — read the screen the
+                // step finished on and say what actually happened instead.
+                return report
+                    ?: reportOutcome(todo, service.asActuator())
+                    ?: "Finished: $todo"
             }
             override suspend fun requestInput(question: String, reason: String?): String? {
                 val answer = service.requestInput(question, reason)
