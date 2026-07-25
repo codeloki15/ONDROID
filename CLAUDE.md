@@ -69,6 +69,15 @@ app/src/main/java/com/locallink/pro/
    device logs `disabled due to previous underrun`.
 8. **`AgentEvent.Token` is a DELTA, not a snapshot** — consumers must append. All three
    `ChatRepository` collectors accumulate and reset per turn.
+9. **Composio triggers can't work on-device — don't rebuild them.** Probed against a live
+   account (2026-07-25): `/api/v3/triggers_types` lists fine (86 types across 7 connected
+   apps) and `/api/v3/trigger_instances/active` returns 200, so subscriptions *can* be
+   managed. But every event-retrieval candidate 404s — `trigger_logs`, `logs?type=trigger`,
+   `trigger_instances/logs`. Composio delivers events by **webhook only**, and a phone has
+   no public URL, so a subscription UI would let users arm triggers that could never fire.
+   Needs a relay server; until then the existing notification triggers
+   (`OmniNotificationListener`) already cover the common cases — a Gmail push becomes an
+   Android notification, which OmniPro rules can match — with no server at all.
 
 ## Cross-cutting systems
 
