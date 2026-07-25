@@ -26,11 +26,22 @@ import kotlin.concurrent.thread
 @Singleton
 class WakeWordEngine @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val settings: com.locallink.pro.data.local.SettingsPreferences,
 ) {
     companion object {
         private const val TAG = "WakeWordEngine"
         private const val SAMPLE_RATE = 16000
         private const val DIR = "kws"
+
+        /**
+         * Repeat mode: how much of the strict threshold the lenient pass uses. Lower = easier to
+         * register a candidate. Deliberately well below the strict value — a lenient hit alone
+         * never wakes anything, it only counts toward a repeat.
+         */
+        private const val LENIENT_FACTOR = 0.35f
+
+        /** Two lenient hits inside this window read as a deliberate, repeated invocation. */
+        private const val REPEAT_WINDOW_MS = 4_000L
     }
 
     var onWake: (() -> Unit)? = null
@@ -67,6 +78,26 @@ class WakeWordEngine @Inject constructor(
         Log.d(TAG, "KeywordSpotter ready")
     }
 
+    /**
+     * The bundled keyword spec re-emitted with every `#threshold` scaled by [LENIENT_FACTOR].
+     *
+     * Lines look like `▁HE Y ▁O M N I :3.5 #0.06 @HEY_OMNI`; only the `#` field is rewritten so
+     * the phonetic tokens and boost stay exactly as tuned. Returns null if the asset can't be
+     * read or parsed, which simply means repeat mode stays off.
+     */
+    private fun lenientKeywordSpec(): String? = runCatching {
+        val lines = context.assets.open("$DIR/keywords.txt").bufferedReader().use { it.readLines() }
+        val out = lines.mapNotNull { raw ->
+            val line = raw.trim()
+            if (line.isEmpty() || line.startsWith("#")) return@mapNotNull null
+            Regex("#([0-9]*\\.?[0-9]+)").find(line)?.let { m ->
+                val relaxed = (m.groupValues[1].toFloat() * LENIENT_FACTOR).coerceAtLeast(0.005f)
+                line.replaceRange(m.range, "#%.4f".format(relaxed))
+            } ?: line
+        }
+        out.takeIf { it.isNotEmpty() }?.joinToString("\n")
+    }.onFailure { Log.w(TAG, "could not build lenient keyword spec", it) }.getOrNull()
+
     @SuppressLint("MissingPermission") // caller ensures RECORD_AUDIO granted
     @Synchronized
     fun start() {
@@ -89,6 +120,19 @@ class WakeWordEngine @Inject constructor(
         val sp = spotter ?: return
         val stream = sp.createStream()
 
+        // Optional second pass at a much lower threshold. A hit here NEVER wakes on its own —
+        // two hits inside REPEAT_WINDOW_MS do, which is what makes saying "Hey Omni" twice work
+        // for a voice the strict threshold keeps missing. Strict single-shot waking is untouched.
+        // Any failure (unreadable asset, spec the native side rejects) degrades to single-stream.
+        val repeatMode = runCatching { kotlinx.coroutines.runBlocking { settings.loadWakeRepeat() } }
+            .getOrDefault(false)
+        val lenient = if (!repeatMode) null else lenientKeywordSpec()?.let { spec ->
+            runCatching { sp.createStream(spec) }
+                .onFailure { Log.w(TAG, "lenient stream rejected — repeat mode off", it) }
+                .getOrNull()
+        }
+        if (lenient != null) Log.i(TAG, "repeat mode on (say \"Hey Omni\" twice)")
+
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
         ).coerceAtLeast(SAMPLE_RATE / 4)
@@ -108,13 +152,15 @@ class WakeWordEngine @Inject constructor(
             val floats = FloatArray(minBuf)
             var reads = 0L
             var fired = false
+            var lastLenientHitAt = 0L
             try {
                 while (running) {
                     val n = ar.read(buf, 0, buf.size)
                     if (n <= 0) continue
                     if (++reads % 20L == 0L) Log.d(TAG, "listening… ($reads reads)")
                     for (i in 0 until n) floats[i] = buf[i] / 32768f
-                    stream.acceptWaveform(floats.copyOf(n), SAMPLE_RATE)
+                    val chunk = floats.copyOf(n)
+                    stream.acceptWaveform(chunk, SAMPLE_RATE)
                     while (sp.isReady(stream)) {
                         sp.decode(stream)
                         val kw = sp.getResult(stream).keyword
@@ -123,6 +169,25 @@ class WakeWordEngine @Inject constructor(
                             sp.reset(stream)
                             running = false   // exit the read loop; mic released in finally
                             fired = true
+                        }
+                    }
+
+                    if (lenient != null && running) {
+                        lenient.acceptWaveform(chunk, SAMPLE_RATE)
+                        while (sp.isReady(lenient)) {
+                            sp.decode(lenient)
+                            if (sp.getResult(lenient).keyword.isEmpty()) continue
+                            sp.reset(lenient)
+                            val now = System.currentTimeMillis()
+                            if (now - lastLenientHitAt <= REPEAT_WINDOW_MS) {
+                                Log.i(TAG, "wake on repeated attempt")
+                                lastLenientHitAt = 0L
+                                running = false
+                                fired = true
+                            } else {
+                                // First candidate: remember it and wait to see if it's repeated.
+                                lastLenientHitAt = now
+                            }
                         }
                     }
                 }
