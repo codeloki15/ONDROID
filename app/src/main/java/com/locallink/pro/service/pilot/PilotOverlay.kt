@@ -13,7 +13,12 @@ import androidx.core.content.res.ResourcesCompat
 import com.locallink.pro.R
 
 /** A floating STOP pill added via TYPE_ACCESSIBILITY_OVERLAY so it sits above every app. */
-class PilotOverlay(private val ctx: Context, private val onStop: () -> Unit) {
+class PilotOverlay(
+    private val ctx: Context,
+    /** Pill caption — the same floating control stops a pilot run or a recording. */
+    private val label: String = "\u25A0  STOP",
+    private val onStop: () -> Unit,
+) {
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var view: View? = null
 
@@ -24,7 +29,7 @@ class PilotOverlay(private val ctx: Context, private val onStop: () -> Unit) {
         val semibold: Typeface? =
             runCatching { ResourcesCompat.getFont(ctx, R.font.epilogue_semibold) }.getOrNull()
         val btn = TextView(ctx).apply {
-            text = "■  STOP"
+            text = label
             setTextColor(Color.WHITE)
             textSize = 13f
             typeface = semibold
