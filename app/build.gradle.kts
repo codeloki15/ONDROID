@@ -96,6 +96,8 @@ dependencies {
 
     // OkHttp — Groq (gpt-oss-120b) cloud chat + tool calling
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Composio streams trigger events over Pusher (private channel) — no webhook URL needed.
+    implementation("com.pusher:pusher-java-client:2.4.4")
 
     // Core Android
     implementation("androidx.core:core-ktx:1.15.0")

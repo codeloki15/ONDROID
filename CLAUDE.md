@@ -69,15 +69,20 @@ app/src/main/java/com/locallink/pro/
    device logs `disabled due to previous underrun`.
 8. **`AgentEvent.Token` is a DELTA, not a snapshot** — consumers must append. All three
    `ChatRepository` collectors accumulate and reset per turn.
-9. **Composio triggers can't work on-device — don't rebuild them.** Probed against a live
-   account (2026-07-25): `/api/v3/triggers_types` lists fine (86 types across 7 connected
-   apps) and `/api/v3/trigger_instances/active` returns 200, so subscriptions *can* be
-   managed. But every event-retrieval candidate 404s — `trigger_logs`, `logs?type=trigger`,
-   `trigger_instances/logs`. Composio delivers events by **webhook only**, and a phone has
-   no public URL, so a subscription UI would let users arm triggers that could never fire.
-   Needs a relay server; until then the existing notification triggers
-   (`OmniNotificationListener`) already cover the common cases — a Gmail push becomes an
-   Android notification, which OmniPro rules can match — with no server at all.
+9. **Composio trigger events arrive over a Pusher WebSocket, not a webhook.** A phone has no
+   public URL, and every REST polling endpoint 404s (`trigger_logs`, `logs?type=trigger`,
+   `trigger_instances/logs`) — which is *not* the same as "undeliverable". Composio's own
+   SDKs use `triggers.subscribe()`, which opens a Pusher connection, and a phone holds that
+   fine. `ComposioRealtimeClient` speaks it directly:
+   `GET /api/v3/internal/sdk/realtime/credentials` → `pusher_key`/`pusher_cluster`/
+   `project_id`, then private channel `private-{project_id}_triggers`, events
+   `trigger_to_client` + `chunked-trigger_to_client`.
+   - Channel auth is `POST /api/v3/internal/sdk/realtime/auth` with **only** an `x-api-key`
+     header. Do NOT add `Content-Type: application/json` — the authorizer posts
+     `socket_id`/`channel_name` form-encoded, and declaring JSON makes auth fail.
+   - These are `/internal/` endpoints and Composio documents `subscribe()` as a prototyping
+     path, so treat breakage as expected: every failure degrades quietly (triggers stop
+     arriving, nothing else breaks).
 
 ## Cross-cutting systems
 
