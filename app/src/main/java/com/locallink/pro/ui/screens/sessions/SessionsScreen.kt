@@ -17,6 +17,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowOutward
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Settings
@@ -137,7 +140,7 @@ fun SessionsScreen(
                         item {
                             ActionCard(
                                 "New\nchat",
-                                glyph = com.locallink.pro.ui.components.ModeGlyph.Chat,
+                                icon = Icons.Outlined.ChatBubbleOutline,
                                 tint = AuroraViolet,
                                 onClick = onOpenChat,
                             )
@@ -145,7 +148,7 @@ fun SessionsScreen(
                         item {
                             ActionCard(
                                 "Voice\nchat",
-                                glyph = com.locallink.pro.ui.components.ModeGlyph.Voice,
+                                icon = Icons.Outlined.GraphicEq,
                                 tint = AuroraPink,
                                 onClick = onOpenVoice,
                             )
@@ -153,7 +156,7 @@ fun SessionsScreen(
                         item {
                             ActionCard(
                                 "Automate\nmy phone",
-                                glyph = com.locallink.pro.ui.components.ModeGlyph.Automate,
+                                icon = Icons.Outlined.AutoAwesome,
                                 tint = AuroraPeach,
                                 onClick = onOpenAutomate,
                             )
@@ -236,7 +239,7 @@ fun SessionsScreen(
 @Composable
 private fun ActionCard(
     title: String,
-    glyph: com.locallink.pro.ui.components.ModeGlyph,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     tint: Color,
     onClick: () -> Unit,
 ) {
@@ -249,8 +252,7 @@ private fun ActionCard(
             .padding(18.dp),
     ) {
         // Tinted glyph badge — the three modes were previously distinguishable only by their
-        // label, all carrying the same generic arrow. The mark animates so each card shows
-        // what its mode does rather than just naming it.
+        // label, all carrying the same generic arrow.
         Box(
             Modifier
                 .size(34.dp)
@@ -258,11 +260,7 @@ private fun ActionCard(
                 .background(tint.copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center,
         ) {
-            com.locallink.pro.ui.components.AnimatedModeGlyph(
-                glyph = glyph,
-                tint = OmniText,
-                modifier = Modifier.size(18.dp),
-            )
+            Icon(icon, null, tint = OmniText, modifier = Modifier.size(19.dp))
         }
         Text(
             title,
