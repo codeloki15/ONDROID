@@ -5,6 +5,7 @@ import com.locallink.pro.data.local.SettingsPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -38,6 +39,8 @@ class ComposioClient @Inject constructor(
         private const val TOOLKITS_URL = "$BASE/api/v3/toolkits"
         private const val AUTHCFG_URL = "$BASE/api/v3/auth_configs"
         private const val CONN_URL = "$BASE/api/v3/connected_accounts"
+        private const val TRIGGER_TYPES_URL = "$BASE/api/v3/triggers_types"
+        private const val TRIGGER_INSTANCES_URL = "$BASE/api/v3/trigger_instances"
         const val CALLBACK_URL = "omnipin://composio/callback"
 
         /** Caps for [directToolSchemas] — registered tools cost prompt tokens on every turn. */
@@ -310,6 +313,85 @@ class ComposioClient @Inject constructor(
         }
     }
 
+    // ─── Triggers ────────────────────────────────────────────────────────────
+    // Events are delivered over a WebSocket by ComposioRealtimeClient; these manage which
+    // triggers Composio should send in the first place.
+
+    /** Trigger types the user's connected apps can fire ("new Gmail message", …). */
+    suspend fun triggerTypes(): List<ComposioTriggerType> = withContext(Dispatchers.IO) {
+        val key = settings.loadComposioApiKey()
+        if (key.isBlank()) return@withContext emptyList()
+        val toolkits = connectedToolkits()
+        if (toolkits.isEmpty()) return@withContext emptyList()
+
+        coroutineScope {
+            toolkits.map { slug ->
+                async {
+                    runCatching {
+                        val (code, text) = get("$TRIGGER_TYPES_URL?toolkit_slugs=$slug&limit=50", key)
+                        if (code != 200) {
+                            Log.w(TAG, "triggerTypes $slug HTTP $code")
+                            return@runCatching emptyList<ComposioTriggerType>()
+                        }
+                        val items = JSONObject(text).optJSONArray("items")
+                            ?: JSONObject(text).optJSONArray("data") ?: JSONArray()
+                        (0 until items.length()).mapNotNull { i ->
+                            val t = items.optJSONObject(i) ?: return@mapNotNull null
+                            val tSlug = t.optString("slug").ifBlank { t.optString("name") }
+                            if (tSlug.isBlank()) return@mapNotNull null
+                            ComposioTriggerType(
+                                slug = tSlug,
+                                name = t.optString("name").ifBlank { tSlug },
+                                description = t.optString("description").take(200),
+                                toolkit = slug,
+                            )
+                        }
+                    }.onFailure { Log.w(TAG, "triggerTypes $slug failed", it) }
+                        .getOrDefault(emptyList())
+                }
+            }.awaitAll().flatten()
+        }
+    }
+
+    /**
+     * Subscribe the user to [slug] so Composio starts emitting it. Returns the instance id.
+     *
+     * Without this the WebSocket connects happily and simply never receives anything — the
+     * failure mode is silence, so the caller should surface a failure rather than swallow it.
+     */
+    suspend fun enableTrigger(slug: String, config: JSONObject = JSONObject()): String? =
+        withContext(Dispatchers.IO) {
+            val key = settings.loadComposioApiKey()
+            if (key.isBlank()) return@withContext null
+            val userId = settings.loadComposioUserId()
+            runCatching {
+                val body = JSONObject()
+                    .put("user_id", userId)
+                    .put("trigger_config", config)
+                val (code, text) = post("$TRIGGER_INSTANCES_URL/$slug/upsert", key, body)
+                if (code !in 200..299) {
+                    Log.w(TAG, "enableTrigger $slug HTTP $code: ${text.take(200)}")
+                    return@runCatching null
+                }
+                val o = JSONObject(text)
+                (o.optString("trigger_id").ifBlank { o.optString("id") })
+                    .ifBlank { o.optJSONObject("data")?.optString("id").orEmpty() }
+                    .takeIf { it.isNotBlank() }
+                    .also { Log.i(TAG, "enabled trigger $slug -> $it") }
+            }.onFailure { Log.w(TAG, "enableTrigger $slug failed", it) }.getOrNull()
+        }
+
+    /** Stop Composio emitting a previously enabled trigger instance. */
+    suspend fun disableTrigger(instanceId: String): Boolean = withContext(Dispatchers.IO) {
+        val key = settings.loadComposioApiKey()
+        if (key.isBlank()) return@withContext false
+        runCatching {
+            val (code, text) = delete("$TRIGGER_INSTANCES_URL/manage/$instanceId", key)
+            if (code !in 200..299) Log.w(TAG, "disableTrigger HTTP $code: ${text.take(160)}")
+            code in 200..299
+        }.getOrDefault(false)
+    }
+
     /** Execute a Composio tool server-side; returns a result string for the LLM. */
     suspend fun execute(slug: String, arguments: JSONObject): String = withContext(Dispatchers.IO) {
         val key = settings.loadComposioApiKey()
@@ -498,4 +580,12 @@ data class ComposioApp(
     val connected: Boolean,
     val noAuth: Boolean = false, // works without connecting (e.g. the "composio" toolkit)
     val connectedAccountId: String? = null, // the ACTIVE connected-account id, for disconnect
+)
+
+/** A trigger a connected Composio app can fire (e.g. "new Gmail message"). */
+data class ComposioTriggerType(
+    val slug: String,
+    val name: String,
+    val description: String,
+    val toolkit: String,
 )
