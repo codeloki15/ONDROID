@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.MoreVert
@@ -44,6 +45,17 @@ fun RoutinesScreen(
     LaunchedEffect(Unit) { vm.toast.collect { snackbar.showSnackbar(it) } }
 
     var renaming by remember { mutableStateOf<ExperienceEntity?>(null) }
+    // Teaching runs in three beats: name it, demonstrate it, save it.
+    var teaching by remember { mutableStateOf(false) }
+    var teachName by remember { mutableStateOf("") }
+    var needsA11y by remember { mutableStateOf(false) }
+    val recordedSteps by vm.recordedSteps.collectAsState()
+    val isRecording by vm.isRecording.collectAsState()
+    val pendingName by vm.pendingName.collectAsState()
+    // Derived, never remembered: demonstrating means leaving the app, and Compose state doesn't
+    // survive that — the prompt has to still be there when the user comes back to save.
+    val demonstrating = isRecording || recordedSteps.isNotEmpty()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         containerColor = OmniBg,
@@ -61,6 +73,17 @@ fun RoutinesScreen(
                 ),
             )
         },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { teaching = true },
+                containerColor = OmniText,
+                contentColor = androidx.compose.ui.graphics.Color.White,
+            ) {
+                Icon(Icons.Outlined.School, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Teach a routine")
+            }
+        },
     ) { pad ->
         if (routines.isEmpty()) {
             Column(
@@ -74,7 +97,8 @@ fun RoutinesScreen(
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Every phone task Omni completes in \"Automate my phone\" is learned here " +
-                        "and replayed instantly the next time you ask.",
+                        "and replayed instantly the next time you ask \u2014 or teach one " +
+                        "yourself by showing Omni once.",
                     style = MaterialTheme.typography.bodyMedium, color = OmniTextDim,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
@@ -97,6 +121,120 @@ fun RoutinesScreen(
                 }
             }
         }
+    }
+
+    if (needsA11y) {
+        AlertDialog(
+            onDismissRequest = { needsA11y = false },
+            title = { Text("Turn on Automate first") },
+            text = {
+                Text(
+                    "Teaching works by watching what you do, which needs OmniPro's accessibility " +
+                        "service switched on. Enable it, then try again.",
+                    style = MaterialTheme.typography.bodyMedium, color = OmniTextDim,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    needsA11y = false
+                    runCatching {
+                        context.startActivity(
+                            android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }) { Text("Open settings") }
+            },
+            dismissButton = { TextButton(onClick = { needsA11y = false }) { Text("Not now") } },
+            containerColor = OmniSurface2,
+            titleContentColor = OmniText,
+        )
+    }
+
+    // 1. Name the routine. The name is also how it's invoked later ("run <name>"), so it's
+    //    collected up front rather than after the fact.
+    if (teaching) {
+        AlertDialog(
+            onDismissRequest = { teaching = false },
+            title = { Text("Teach a routine") },
+            text = {
+                Column {
+                    Text(
+                        "Give it a name, then do it once on your phone. Omni watches and keeps " +
+                            "the steps, so you can ask for it or schedule it later.",
+                        style = MaterialTheme.typography.bodyMedium, color = OmniTextDim,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = teachName,
+                        onValueChange = { teachName = it },
+                        singleLine = true,
+                        label = { Text("Call it…") },
+                        placeholder = { Text("e.g. play my morning playlist") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = teachName.isNotBlank(),
+                    onClick = {
+                        if (vm.startTeaching(teachName)) {
+                            teaching = false
+                            // Get out of the way — the demonstration happens in other apps, and
+                            // the floating STOP pill is how the user comes back.
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(android.content.Intent.ACTION_MAIN)
+                                        .addCategory(android.content.Intent.CATEGORY_HOME)
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }
+                        } else {
+                            // Recording needs the accessibility service; say so instead of
+                            // closing the dialog as though something happened.
+                            teaching = false
+                            needsA11y = true
+                        }
+                    },
+                ) { Text("Start recording") }
+            },
+            dismissButton = { TextButton(onClick = { teaching = false }) { Text("Cancel") } },
+            containerColor = OmniSurface2,
+            titleContentColor = OmniText,
+        )
+    }
+
+    // 2/3. Back in the app after demonstrating: review the step count and keep or discard.
+    if (demonstrating) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Recording “$teachName”") },
+            text = {
+                Text(
+                    if (recordedSteps.isEmpty())
+                        "Go and do the task on your phone. Tap the floating STOP pill when " +
+                            "you're done, then come back here to save it."
+                    else "Captured ${recordedSteps.size} step" +
+                        (if (recordedSteps.size == 1) "" else "s") +
+                        " so far. Save when the task is complete.",
+                    style = MaterialTheme.typography.bodyMedium, color = OmniTextDim,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = recordedSteps.isNotEmpty(),
+                    onClick = { vm.finishTeaching(); teachName = "" },
+                ) { Text("Save routine") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.cancelTeaching(); teachName = "" }) {
+                    Text("Discard")
+                }
+            },
+            containerColor = OmniSurface2,
+            titleContentColor = OmniText,
+        )
     }
 
     renaming?.let { r ->
@@ -211,6 +349,7 @@ private fun RoutineCard(
             }
         }
     }
+
 
     if (confirmDelete) {
         AlertDialog(

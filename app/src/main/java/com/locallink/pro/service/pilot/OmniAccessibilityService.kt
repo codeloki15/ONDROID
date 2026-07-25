@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import java.util.concurrent.atomic.AtomicBoolean
 
+@dagger.hilt.android.AndroidEntryPoint
 class OmniAccessibilityService : AccessibilityService() {
 
     val cancelFlag = AtomicBoolean(false)
@@ -49,7 +50,7 @@ class OmniAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
-        overlay = PilotOverlay(this) { cancelFlag.set(true); hideStop() }
+        overlay = PilotOverlay(this, onStop = { cancelFlag.set(true); hideStop() })
     }
 
     override fun onDestroy() {
@@ -68,9 +69,38 @@ class OmniAccessibilityService : AccessibilityService() {
     @Volatile var lastUiChangeAt: Long = 0L
         private set
 
+    /** Captures a user demonstration when the user is teaching a routine. */
+    @javax.inject.Inject lateinit var recorder: RoutineRecorder
+    private var recordOverlay: PilotOverlay? = null
+
+    /**
+     * Begin recording a demonstration, with a floating stop pill.
+     *
+     * The pill matters: teaching means leaving Omni to work in other apps, so the control to end
+     * the recording has to float above whatever the user is in.
+     */
+    fun startRecording(name: String) {
+        recorder.start(packageName, name)
+        mainHandler.post {
+            recordOverlay?.hide()
+            recordOverlay = PilotOverlay(this, "● STOP RECORDING") { stopRecording() }
+                .also { it.show() }
+        }
+    }
+
+    /** End the recording and return the demonstrated steps. */
+    fun stopRecording(): List<TraceStep> {
+        mainHandler.post { recordOverlay?.hide(); recordOverlay = null }
+        return recorder.stop()
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Perception is pull-based; the only thing we take from the event stream is its timing.
         lastUiChangeAt = android.os.SystemClock.uptimeMillis()
+        // …except while teaching, when the events ARE the routine.
+        if (event != null && recorder.isRecording.value) {
+            runCatching { recorder.onEvent(event) }
+        }
     }
     override fun onInterrupt() {}
 
