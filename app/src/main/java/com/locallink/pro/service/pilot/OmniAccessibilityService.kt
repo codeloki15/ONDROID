@@ -59,7 +59,19 @@ class OmniAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* perception is pull-based */ }
+    /**
+     * When the UI last changed (window state or content), as [android.os.SystemClock.uptimeMillis].
+     *
+     * Perception itself is pull-based, but the pilot uses this to tell when a screen has finished
+     * reacting to an action instead of sleeping a fixed interval — see PilotController's settle.
+     */
+    @Volatile var lastUiChangeAt: Long = 0L
+        private set
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Perception is pull-based; the only thing we take from the event stream is its timing.
+        lastUiChangeAt = android.os.SystemClock.uptimeMillis()
+    }
     override fun onInterrupt() {}
 
     @Volatile private var stopActive = false

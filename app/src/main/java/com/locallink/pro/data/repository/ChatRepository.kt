@@ -35,6 +35,7 @@ class ChatRepository @Inject constructor(
     private val settings: SettingsPreferences,
     private val experiences: ExperienceStore,
     private val memory: MemoryStore,
+    private val deviceTools: com.locallink.pro.service.llm.tools.DeviceToolFastPath,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) {
     private companion object { const val TAG = "ChatRepository" }
@@ -301,7 +302,7 @@ class ChatRepository @Inject constructor(
             try {
                 openRouter.run(history, task) { _, _ -> true }.collect { event ->
                     when (event) {
-                        is AgentEvent.Token -> _streamingText.value = event.text
+                        is AgentEvent.Token -> _streamingText.value += event.text
                         is AgentEvent.ToolCall -> messageDao.insert(MessageEntity(
                             sessionId = sessionId, role = "tool_call",
                             text = "${event.name}(${event.argsJson})", timestamp = System.currentTimeMillis(),
@@ -358,6 +359,33 @@ class ChatRepository @Inject constructor(
         }
     }
 
+    /**
+     * Does this utterance need the phone driven, or is it just something to answer?
+     *
+     * Hands-free speech arrives with no mode attached, so the voice loop used to send every
+     * utterance to the agent — "what's 20% of 340" would foreground the app and start a
+     * screenshot→reason→tap loop to answer a question that needed one sentence back.
+     *
+     * Defaults to true (action) whenever the model can't be reached, so a classification
+     * failure degrades to the previous behaviour rather than silently dropping a real command.
+     */
+    suspend fun isPhoneAction(text: String): Boolean {
+        val verdict = runCatching {
+            openRouter.plainChat(
+                "Classify this request. Answer with exactly one word.\n" +
+                    "ACTION — it asks you to operate the phone or its apps (open, send, play, " +
+                    "set, call, post, reply, search in an app, change a setting).\n" +
+                    "CHAT — it is a question, a fact lookup, or conversation you can answer in words.\n\n" +
+                    "Request: $text",
+            )
+        }.getOrDefault("")
+        // Substring, not equality: models like to wrap one-word answers in punctuation or quotes.
+        if (verdict.contains("CHAT", ignoreCase = true)) return false
+        if (verdict.contains("ACTION", ignoreCase = true)) return true
+        Log.w(TAG, "unclear intent verdict '${verdict.take(40)}' — treating as an action")
+        return true
+    }
+
     /** Planning-agent entry: plan → route todos to chat/composio/pilot → execute, with input pauses. */
     suspend fun runAgent(task: String, onOutcome: ((Boolean, String) -> Unit)? = null) {
         val now = System.currentTimeMillis()
@@ -396,6 +424,22 @@ class ChatRepository @Inject constructor(
                 return
             }
         }
+        // FAST PATH — one on-device function does the whole job (set an alarm, start a timer,
+        // launch an app, toggle the torch …). One round trip and an intent, instead of a planner
+        // pass plus a screenshot→reason→tap loop. Deliberately BEFORE the accessibility check:
+        // these are plain intents, so they work even when the a11y service is off.
+        deviceTools.tryHandle(task)?.let { outcome ->
+            Log.i(TAG, "device tool '${outcome.toolName}' handled the task")
+            messageDao.insert(MessageEntity(
+                sessionId = sessionId, role = "assistant", text = outcome.reply,
+                timestamp = System.currentTimeMillis(),
+            ))
+            _lastAssistantReply.value = outcome.reply
+            touchSession(sessionId)
+            onOutcome?.invoke(true, outcome.reply)
+            return
+        }
+
         val service = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
         if (service == null) {
             // No device control available — still answer in plain chat instead of hard-failing.
@@ -503,6 +547,8 @@ class ChatRepository @Inject constructor(
             com.locallink.pro.service.pilot.OpenRouterPlanner(settings, { memory.promptBlock() }), runner,
             cancelled = { service.cancelFlag.get() },
             screenSummary = screenSummaryOf(service.asActuator()),
+            // A near-miss on the learned-routine lookup still has something to teach the planner.
+            priorRoutines = { t -> experiences.priorRoutinesBlock(t) },
         )
         noteIfQueued(sessionId, task)
         var planStopped = false
@@ -523,7 +569,7 @@ class ChatRepository @Inject constructor(
     /** Persist one Pilot [AgentEvent] to the chat DB (runs in the service scope). */
     private suspend fun persistPilotEvent(sessionId: String, event: AgentEvent) {
         when (event) {
-            is AgentEvent.Token -> _streamingText.value = event.text
+            is AgentEvent.Token -> _streamingText.value += event.text
             is AgentEvent.ToolCall -> messageDao.insert(MessageEntity(
                 sessionId = sessionId, role = "tool_call",
                 text = "${event.name}(${event.argsJson})", timestamp = System.currentTimeMillis(),
@@ -624,9 +670,12 @@ class ChatRepository @Inject constructor(
         sessionId: String,
         events: kotlinx.coroutines.flow.Flow<AgentEvent>,
     ) {
+        // Token events are deltas that accumulate here; a multi-todo run calls this once per
+        // engine, so clear the buffer or the previous todo's reply prefixes this one.
+        _streamingText.value = ""
         events.collect { event ->
             when (event) {
-                is AgentEvent.Token -> _streamingText.value = event.text
+                is AgentEvent.Token -> _streamingText.value += event.text
                 is AgentEvent.ToolCall -> messageDao.insert(
                     MessageEntity(
                         sessionId = sessionId, role = "tool_call",

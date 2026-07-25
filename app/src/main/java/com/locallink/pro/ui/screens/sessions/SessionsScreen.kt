@@ -17,6 +17,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowOutward
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Settings
@@ -49,6 +52,7 @@ fun SessionsScreen(
     onOpenVoice: () -> Unit = { onOpenSession(null) },
     onOpenAutomate: () -> Unit = { onOpenSession(null) },
     onOpenSettings: () -> Unit,
+    onOpenDashboard: () -> Unit = {},
     vm: SessionsViewModel = hiltViewModel(),
 ) {
     val sessions by vm.sessions.collectAsState()
@@ -133,9 +137,30 @@ fun SessionsScreen(
                         Modifier.padding(top = 22.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        item { ActionCard("New\nchat", onClick = onOpenChat) }
-                        item { ActionCard("Voice\nchat", onClick = onOpenVoice) }
-                        item { ActionCard("Automate\nmy phone", onClick = onOpenAutomate) }
+                        item {
+                            ActionCard(
+                                "New\nchat",
+                                icon = Icons.Outlined.ChatBubbleOutline,
+                                tint = AuroraViolet,
+                                onClick = onOpenChat,
+                            )
+                        }
+                        item {
+                            ActionCard(
+                                "Voice\nchat",
+                                icon = Icons.Outlined.GraphicEq,
+                                tint = AuroraPink,
+                                onClick = onOpenVoice,
+                            )
+                        }
+                        item {
+                            ActionCard(
+                                "Automate\nmy phone",
+                                icon = Icons.Outlined.AutoAwesome,
+                                tint = AuroraPeach,
+                                onClick = onOpenAutomate,
+                            )
+                        }
                     }
                 }
                 item {
@@ -145,7 +170,19 @@ fun SessionsScreen(
                     ) {
                         Text("History", style = MaterialTheme.typography.headlineSmall, color = OmniText)
                         Spacer(Modifier.weight(1f))
+                        // Work started outside the app (voice, triggers, schedules) doesn't read
+                        // as "history" — the activity feed is where it becomes visible.
+                        Text(
+                            "Activity",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = AuroraVioletHi,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(onClick = onOpenDashboard)
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                        )
                         if (filtered.size > 6 && query.isBlank()) {
+                            Spacer(Modifier.width(4.dp))
                             Text(
                                 if (showAll) "Show less" else "See all",
                                 style = MaterialTheme.typography.labelLarge,
@@ -200,7 +237,12 @@ fun SessionsScreen(
 
 /** Outlined quick-action card with an ↗ arrow, per the reference. */
 @Composable
-private fun ActionCard(title: String, onClick: () -> Unit) {
+private fun ActionCard(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    onClick: () -> Unit,
+) {
     Column(
         Modifier
             .size(width = 140.dp, height = 146.dp)
@@ -209,11 +251,22 @@ private fun ActionCard(title: String, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(18.dp),
     ) {
+        // Tinted glyph badge — the three modes were previously distinguishable only by their
+        // label, all carrying the same generic arrow.
+        Box(
+            Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(tint.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = OmniText, modifier = Modifier.size(19.dp))
+        }
         Text(
             title,
             style = MaterialTheme.typography.titleLarge,
             color = OmniText,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).padding(top = 10.dp),
         )
         Icon(
             Icons.Outlined.ArrowOutward, null,

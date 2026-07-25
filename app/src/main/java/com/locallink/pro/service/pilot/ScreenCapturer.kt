@@ -12,7 +12,20 @@ import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
 
 class ScreenCapturer(private val metrics: DisplayMetrics) {
-    /** Grab one frame via a short-lived VirtualDisplay, return a JPEG (quality 50). */
+    companion object {
+        /**
+         * Longest edge, in pixels, of the JPEG handed to the vision model.
+         *
+         * The frame is captured at native resolution but sent downscaled: a modern phone is
+         * ~1440×3120, and that image is base64'd inline into the prompt on EVERY pilot step, up
+         * to 60 steps per run. Scaling the long edge to 1280 cuts the pixel count (and so the
+         * image tokens and upload time) by roughly 4× while leaving on-screen text and controls
+         * comfortably legible — the model only needs to identify elements, not read fine print.
+         */
+        const val MAX_LONG_EDGE = 1280
+    }
+
+    /** Grab one frame via a short-lived VirtualDisplay, return a downscaled JPEG (quality 50). */
     suspend fun capture(mp: MediaProjection): ByteArray? = suspendCancellableCoroutine { cont ->
         val w = metrics.widthPixels
         val h = metrics.heightPixels
@@ -28,7 +41,7 @@ class ScreenCapturer(private val metrics: DisplayMetrics) {
                 ).apply { copyPixelsFromBuffer(plane.buffer) }
                 val cropped = Bitmap.createBitmap(bmp, 0, 0, w, h)
                 val out = ByteArrayOutputStream()
-                cropped.compress(Bitmap.CompressFormat.JPEG, 50, out)
+                downscale(cropped).compress(Bitmap.CompressFormat.JPEG, 50, out)
                 if (cont.isActive) cont.resume(out.toByteArray())
             } catch (e: Exception) {
                 if (cont.isActive) cont.resume(null)
@@ -41,5 +54,15 @@ class ScreenCapturer(private val metrics: DisplayMetrics) {
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.surface, null, null,
         )
         cont.invokeOnCancellation { runCatching { vd?.release(); reader.close() } }
+    }
+
+    /** Shrink so the long edge is at most [MAX_LONG_EDGE], preserving aspect ratio. */
+    private fun downscale(src: Bitmap): Bitmap {
+        val longEdge = maxOf(src.width, src.height)
+        if (longEdge <= MAX_LONG_EDGE) return src
+        val scale = MAX_LONG_EDGE.toFloat() / longEdge
+        val w = (src.width * scale).toInt().coerceAtLeast(1)
+        val h = (src.height * scale).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(src, w, h, /* filter = */ true)
     }
 }

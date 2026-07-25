@@ -56,6 +56,19 @@ app/src/main/java/com/locallink/pro/
    runs fight over the one screen and both spiral into replans.
 5. Composio powers **chat and voice only**; Automate's planner emits only chat/pilot
    channels by design.
+6. **The device-tool fast path may only run tools that COMPLETE a task.** Navigation-only
+   tools (`launch_app`, `open_settings`, `open_url`, `web_search`) are excluded in
+   `DeviceToolFastPath.NAVIGATION_ONLY`: "open LinkedIn and comment on the top post"
+   matched `launch_app`, which opened the app and reported the task done, so the pilot
+   never ran. Prompt wording alone did not prevent it. `make_phone_call` is excluded
+   separately — it uses `ACTION_CALL` and would dial unattended.
+7. **Kokoro playback: the AudioTrack buffer size IS the lookahead budget.** `track.write`
+   is `WRITE_BLOCKING`, so a small buffer throttles synthesis to real time and the next
+   sentence can't generate ahead. Playback is also held until ~0.5s is banked
+   (`primeSamples`) — starting on the first chunk drains the track mid-sentence and the
+   device logs `disabled due to previous underrun`.
+8. **`AgentEvent.Token` is a DELTA, not a snapshot** — consumers must append. All three
+   `ChatRepository` collectors accumulate and reset per turn.
 
 ## Cross-cutting systems
 
@@ -71,6 +84,25 @@ app/src/main/java/com/locallink/pro/
   known multimodal models when the selected model rejects images.
 - **Dial fast-path** in `runAgent`: "call <number|remembered contact>" opens the dialer
   prefilled (ACTION_DIAL only — never places calls unattended).
+- **Device-tool fast path** (`service/llm/tools/DeviceToolFastPath.kt`): before Automate
+  plans anything, one tool-calling turn asks whether a single local tool
+  (`ToolRegistry`, 22 intent-backed handlers) completes the task — "set an alarm for 7am"
+  becomes one intent instead of a planner pass plus a screenshot→reason→tap loop. Runs
+  *before* the a11y check, so it works with the service off. Declines → pilot, untouched.
+- **Streaming** (`OpenRouterClient.postChatStreaming`): SSE; `AgentEvent.Token` carries
+  deltas. `ChatViewModel` speaks each completed sentence as it arrives (Kokoro warms up at
+  init and plays a queue gaplessly), so speech starts on sentence 1, not the whole reply.
+- **Composio direct tools** (`ComposioClient.directToolSchemas`): connected apps' tool
+  schemas are fetched once and registered natively, so the model calls `GMAIL_SEND_EMAIL`
+  in one hop and it executes over REST. Meta-tools stay registered as the discovery
+  fallback. Bounded (6/toolkit, 24 total) — every registered tool costs tokens per turn.
+- **Activity dashboard** (`ui/screens/dashboard/`): merges trigger runs and chat sessions
+  into one Planned / Event / Ad-hoc feed, so voice- and trigger-initiated work is visible.
+  Derives voice/agent flags from existing rows (`messages.isVoice`, `tool_call` rows) —
+  no schema migration.
+- **Routine-informed planning**: on a near-miss, `ExperienceStore.priorRoutinesBlock`
+  feeds similar learned routines to the planner as worked examples via `PlanExecutor`'s
+  `priorRoutines`, instead of planning from scratch.
 
 ## Model assets (Git LFS)
 

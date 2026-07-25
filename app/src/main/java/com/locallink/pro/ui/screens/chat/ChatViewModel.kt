@@ -53,11 +53,16 @@ class ChatViewModel @Inject constructor(
                 if (latest != null && latest.id != prevLast &&
                     latest.sender == MessageSender.AI && _uiState.value.autoTts
                 ) {
-                    voiceService.speak(latest.text)
+                    speakFinalReply(latest.text)
                 }
             }
         }
-        viewModelScope.launch { chatRepository.streamingText.collect { t -> _uiState.update { it.copy(streamingText = t) } } }
+        viewModelScope.launch {
+            chatRepository.streamingText.collect { t ->
+                _uiState.update { it.copy(streamingText = t) }
+                if (_uiState.value.autoTts) speakCompletedSentences(t)
+            }
+        }
         viewModelScope.launch { chatRepository.isAiResponding.collect { r -> _uiState.update { it.copy(isAiResponding = r) } } }
         viewModelScope.launch { voiceService.isListening.collect { l -> _uiState.update { it.copy(isListening = l) } } }
         viewModelScope.launch { voiceService.isSpeaking.collect { s -> _uiState.update { it.copy(isSpeaking = s) } } }
@@ -65,6 +70,83 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             voiceService.finalResult.collect { text -> if (text.isNotBlank()) sendMessage(text, isVoice = true) }
         }
+    }
+
+    // ── Streamed speech ─────────────────────────────────────────────────────────
+    // Exactly the text already handed to TTS this turn. The reply is spoken sentence by
+    // sentence as it streams, so speech starts after the model's FIRST sentence instead of
+    // after the whole response; this prefix is what tells us the remainder still to say.
+    private var spokenPrefix = ""
+
+    /**
+     * Speak any sentences that have become complete since the last update. A sentence counts
+     * as complete only once its terminator is followed by whitespace — so a streamed "3." that
+     * is about to become "3.5" is never split mid-number. The trailing sentence therefore has
+     * no whitespace after it and is left to [speakFinalReply].
+     */
+    private fun speakCompletedSentences(full: String) {
+        if (full.isEmpty()) return                       // turn boundary — leave the prefix alone
+        if (!full.startsWith(spokenPrefix)) spokenPrefix = ""   // stream restarted under us
+        var cursor = spokenPrefix.length
+        while (true) {
+            val end = firstCompleteSentenceEnd(full, cursor)
+            if (end < 0) break
+            full.substring(cursor, end).trim()
+                .takeIf { it.isNotEmpty() }
+                ?.let { voiceService.enqueueSpeech(it) }
+            cursor = end
+        }
+        if (cursor > spokenPrefix.length) spokenPrefix = full.substring(0, cursor)
+    }
+
+    /**
+     * Queue [text] ONE SENTENCE AT A TIME. Handing Kokoro a whole paragraph makes it generate the
+     * entire block before emitting any audio (measured on-device: 6.4s for a multi-sentence block
+     * vs ~1.1s per single sentence), which defeats the point of streaming.
+     *
+     * @param bargeInFirst speak the first sentence via [VoiceService.speak] so it cuts off any
+     *   stale utterance; the rest are appended. Used when nothing streamed for this turn.
+     */
+    private fun enqueueBySentence(text: String, bargeInFirst: Boolean) {
+        var barge = bargeInFirst
+        fun say(s: String) {
+            if (barge) { barge = false; voiceService.speak(s) } else voiceService.enqueueSpeech(s)
+        }
+        var cursor = 0
+        while (cursor < text.length) {
+            val end = firstCompleteSentenceEnd(text, cursor)
+            if (end < 0) break
+            text.substring(cursor, end).trim().takeIf { it.isNotEmpty() }?.let { say(it) }
+            cursor = end
+        }
+        // Trailing fragment with no terminator — the last sentence of most replies.
+        text.substring(cursor).trim().takeIf { it.isNotEmpty() }?.let { say(it) }
+    }
+
+    /**
+     * Close out the turn: say whatever streaming didn't already cover. Usually just the final
+     * sentence; the whole reply when nothing streamed (tool-only turns, cached replies), since
+     * the persisted text can also differ from the stream (e.g. an appended connect-app nudge).
+     */
+    private fun speakFinalReply(text: String) {
+        val already = spokenPrefix
+        spokenPrefix = ""
+        val streamed = already.isNotEmpty() && text.startsWith(already)
+        val remainder = if (streamed) text.substring(already.length) else text
+        if (remainder.isBlank()) return
+        // Nothing streamed for this turn → barge in, so a stale utterance doesn't run over this one.
+        enqueueBySentence(remainder, bargeInFirst = already.isEmpty())
+    }
+
+    /** End index (exclusive) of the FIRST finished sentence at/after [from], or -1 if none yet. */
+    private fun firstCompleteSentenceEnd(text: String, from: Int): Int {
+        for (i in from until text.length) {
+            val c = text[i]
+            if (c == '\n') return i + 1
+            if (c != '.' && c != '!' && c != '?') continue
+            if (i + 1 < text.length && text[i + 1].isWhitespace()) return i + 1
+        }
+        return -1
     }
 
     // Entry mode from the home cards: "chat" = plain conversation, "voice" = chat + voice UX,
@@ -86,6 +168,7 @@ class ChatViewModel @Inject constructor(
 
         val trimmed = messageText.trim()
         _uiState.update { it.copy(inputText = "", pendingImageUri = null) }
+        spokenPrefix = "" // new turn: nothing spoken yet (covers turns that ended on an error)
 
         // Escape hatch: "/pilot <task>" forces the raw device-control loop (debug/bypass planner).
         if (trimmed.startsWith("/pilot ", ignoreCase = true)) {

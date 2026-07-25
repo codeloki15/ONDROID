@@ -37,6 +37,10 @@ class ComposioClient @Inject constructor(
         private const val AUTHCFG_URL = "$BASE/api/v3/auth_configs"
         private const val CONN_URL = "$BASE/api/v3/connected_accounts"
         const val CALLBACK_URL = "omnipin://composio/callback"
+
+        /** Caps for [directToolSchemas] — registered tools cost prompt tokens on every turn. */
+        private const val PER_TOOLKIT = 6
+        private const val MAX_DIRECT_TOOLS = 24
     }
 
     private val json = "application/json; charset=utf-8".toMediaType()
@@ -48,6 +52,10 @@ class ComposioClient @Inject constructor(
     /** In-memory cache of fetched OpenAI tool schemas (one fetch per app run, not per turn). */
     @Volatile private var cachedSchemas: JSONArray? = null
     @Volatile private var cachedForSlugs: String = ""
+
+    /** Cache for [directToolSchemas], keyed by the sorted connected-toolkit list. */
+    @Volatile private var cachedDirect: JSONArray? = null
+    @Volatile private var cachedDirectFor: String = ""
 
     /** Tool slugs discovered on-demand this run (via search_tools) — so execute() recognizes them. */
     private val discovered = java.util.Collections.synchronizedSet(mutableSetOf<String>())
@@ -77,6 +85,68 @@ class ComposioClient @Inject constructor(
                 arr.getJSONObject(it).optJSONObject("toolkit")?.optString("slug")?.takeIf { s -> s.isNotBlank() }
             }.distinct()
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * OpenAI tool schemas for the user's connected apps, ready to hand straight to the model.
+     *
+     * The meta-tool protocol costs at least three LLM round trips before anything happens —
+     * SEARCH_TOOLS to discover, GET_TOOL_SCHEMAS to read the shape, MULTI_EXECUTE_TOOL to run —
+     * so "send an email" spends several seconds discovering a tool the connected account was
+     * always going to have. Fetching those schemas once and registering them natively lets the
+     * model call GMAIL_SEND_EMAIL in a single hop, executed directly through [execute].
+     *
+     * Bounded deliberately: every registered tool costs prompt tokens on EVERY turn, so this
+     * takes the most prominent [PER_TOOLKIT] tools per app up to [MAX_DIRECT_TOOLS] overall.
+     * Anything outside that set still works — the meta-tools remain registered as the fallback.
+     *
+     * Cached in memory against the connected-toolkit list, so reconnecting an app refreshes it.
+     */
+    suspend fun directToolSchemas(): JSONArray = withContext(Dispatchers.IO) {
+        val key = settings.loadComposioApiKey()
+        if (key.isBlank()) return@withContext JSONArray()
+        val toolkits = connectedToolkits()
+        if (toolkits.isEmpty()) return@withContext JSONArray()
+
+        val cacheKey = toolkits.sorted().joinToString(",")
+        cachedDirect?.let { if (cachedDirectFor == cacheKey) return@withContext it }
+
+        val out = JSONArray()
+        for (slug in toolkits) {
+            if (out.length() >= MAX_DIRECT_TOOLS) break
+            runCatching {
+                val (code, text) = get("$LIST_URL?toolkit_slug=$slug&limit=$PER_TOOLKIT", key)
+                if (code != 200) {
+                    Log.w(TAG, "directTools $slug HTTP $code")
+                    return@runCatching
+                }
+                val items = JSONObject(text).optJSONArray("items")
+                    ?: JSONObject(text).optJSONArray("data") ?: JSONArray()
+                for (i in 0 until items.length()) {
+                    if (out.length() >= MAX_DIRECT_TOOLS) break
+                    val t = items.getJSONObject(i)
+                    val name = t.optString("slug").ifBlank { t.optString("name") }
+                    if (name.isBlank() || t.optBoolean("deprecated", false)) continue
+                    val params = t.optJSONObject("input_parameters")
+                        ?: t.optJSONObject("parameters")
+                        ?: JSONObject().put("type", "object").put("properties", JSONObject())
+                    out.put(
+                        JSONObject().put("type", "function").put(
+                            "function",
+                            JSONObject()
+                                .put("name", name)
+                                .put("description", t.optString("description").take(300))
+                                .put("parameters", params),
+                        ),
+                    )
+                    discovered.add(name)   // so execute() recognises it later
+                }
+            }.onFailure { Log.w(TAG, "directTools $slug failed", it) }
+        }
+        Log.i(TAG, "registered ${out.length()} direct tools from ${toolkits.size} connected app(s)")
+        cachedDirect = out
+        cachedDirectFor = cacheKey
+        out
     }
 
     /**
