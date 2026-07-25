@@ -423,9 +423,12 @@ class ChatRepository @Inject constructor(
      *
      * @return a human report of what that step did, for display beside the instruction.
      */
-    suspend fun teachStep(instruction: String): Pair<String, Boolean> {
+    suspend fun teachStep(instruction: String): TeachStepResult {
         val service = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
-            ?: return "Automate is switched off — turn it on to teach a routine." to false
+            ?: return TeachStepResult.Blocked(
+                "Automate is switched off, so Omni can't carry out steps. Turn on the OmniPro " +
+                    "accessibility service and try again.",
+            )
 
         if (!com.locallink.pro.service.pilot.PilotProjectionHolder.isReady) {
             com.locallink.pro.service.pilot.PilotProjectionRequest.request()
@@ -454,8 +457,10 @@ class ChatRepository @Inject constructor(
         val text = report
             ?: reportOutcome(instruction, service.asActuator())
             ?: if (stopped) "Couldn't finish that step." else "Finished: $instruction"
+        // Recorded whether or not it succeeded: a step that didn't work is information the user
+        // needs in the list, not something to hide behind a toast.
         teaching.addStep(instruction, text, !stopped, actions)
-        return text to !stopped
+        return TeachStepResult.Ran(text, !stopped)
     }
 
     /** Store everything taught so far under the session's name, then end the session. */
@@ -840,4 +845,16 @@ class ChatRepository @Inject constructor(
         isVoice = isVoice,
         imageUri = imageUri,
     )
+}
+
+/**
+ * Outcome of one taught step.
+ *
+ * [Blocked] is deliberately distinct from a step that ran and failed: the first is a
+ * precondition the user must fix (Automate switched off), the second belongs in the step list
+ * as a red entry. Collapsing them is how "tap Send, nothing happens at all" came about.
+ */
+sealed interface TeachStepResult {
+    data class Ran(val report: String, val succeeded: Boolean) : TeachStepResult
+    data class Blocked(val reason: String) : TeachStepResult
 }

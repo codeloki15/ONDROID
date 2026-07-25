@@ -24,9 +24,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.locallink.pro.data.repository.ChatRepository
+import com.locallink.pro.data.repository.TeachStepResult
 import com.locallink.pro.service.pilot.GuidedTeachingSession
 import com.locallink.pro.ui.theme.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -41,18 +45,34 @@ class TeachRoutineViewModel @Inject constructor(
     val running = session.running
     val trace = session.trace
 
-    fun begin(routineName: String) = session.start(routineName)
+    /**
+     * Anything that stopped a step from running at all, as opposed to a step that ran and
+     * failed — the latter lands in the step list. Kept separate because swallowing it is how
+     * "tap Send and nothing whatsoever happens" happened.
+     */
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+    fun clearError() { _error.value = null }
+
+    /** Start fresh, unless this same routine is already part-taught (returning to the screen). */
+    fun beginIfNeeded(routineName: String) {
+        if (session.name.value != routineName) session.start(routineName)
+    }
 
     /** Hand one instruction to Omni; it performs it and reports back. */
     fun runStep(instruction: String) = viewModelScope.launch {
         if (instruction.isBlank()) return@launch
-        runCatching { chat.teachStep(instruction) }
+        val result = runCatching { chat.teachStep(instruction) }
+            .getOrElse { TeachStepResult.Blocked(it.message ?: "That step failed unexpectedly.") }
+        if (result is TeachStepResult.Blocked) _error.value = result.reason
     }
 
     fun undoLast() = session.undoLast()
 
-    fun save(onDone: (Boolean) -> Unit) = viewModelScope.launch {
-        onDone(runCatching { chat.saveTaughtRoutine() }.getOrDefault(false))
+    fun save(onDone: () -> Unit) = viewModelScope.launch {
+        val saved = runCatching { chat.saveTaughtRoutine() }.getOrDefault(false)
+        if (saved) onDone()
+        else _error.value = "There's nothing to save yet — add a step that Omni completes first."
     }
 
     fun discard() = session.clear()
@@ -79,12 +99,31 @@ fun TeachRoutineScreen(
     val running by vm.running.collectAsState()
     val trace by vm.trace.collectAsState()
     var draft by remember { mutableStateOf("") }
+    val error by vm.error.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Re-checked on every resume: the service is switched off by Android after each reinstall,
+    // and teaching silently does nothing without it.
+    var automateOn by remember { mutableStateOf(true) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        automateOn = com.locallink.pro.service.pilot.OmniAccessibilityService.instance != null
+        onPauseOrDispose { }
+    }
+
+    error?.let { message ->
+        AlertDialog(
+            onDismissRequest = vm::clearError,
+            title = { Text("Couldn't run that step") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = vm::clearError) { Text("OK") } },
+            containerColor = OmniSurface2,
+            titleContentColor = OmniText,
+        )
+    }
 
     // Resume an in-flight session rather than wiping it: a step navigates through other apps,
     // and coming back must not discard what's been taught.
-    LaunchedEffect(routineName) {
-        if (name.isBlank()) vm.begin(routineName)
-    }
+    LaunchedEffect(routineName) { vm.beginIfNeeded(routineName) }
 
     Scaffold(
         containerColor = OmniBg,
@@ -136,10 +175,10 @@ fun TeachRoutineScreen(
                             .size(48.dp)
                             .clip(CircleShape)
                             .background(if (canSend) OmniText else OmniBorder)
-                            .then(
-                                if (canSend) Modifier.clickable { vm.runStep(draft); draft = "" }
-                                else Modifier
-                            ),
+                            // enabled flag, NOT a conditional .then(): swapping clickable in and
+                            // out as the draft changes rebuilds the modifier chain and the
+                            // pointer input can end up detached, so the circle stops responding.
+                            .clickable(enabled = canSend) { vm.runStep(draft); draft = "" },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (running) {
@@ -161,7 +200,7 @@ fun TeachRoutineScreen(
                         Spacer(Modifier.weight(1f))
                         Button(
                             enabled = trace.isNotEmpty() && !running,
-                            onClick = { vm.save { ok -> if (ok) onSaved() } },
+                            onClick = { vm.save { onSaved() } },
                             colors = ButtonDefaults.buttonColors(containerColor = OmniText),
                         ) { Text("Save routine (${trace.size} actions)") }
                     }
@@ -169,8 +208,41 @@ fun TeachRoutineScreen(
             }
         },
     ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
+        if (!automateOn) {
+            // Stated up front rather than after a step vanishes into nothing.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(OmniSurface)
+                    .border(1.dp, OmniError, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Automate is switched off",
+                        style = MaterialTheme.typography.titleSmall, color = OmniText,
+                    )
+                    Text(
+                        "Omni performs each step itself, so it needs the accessibility service on.",
+                        style = MaterialTheme.typography.bodySmall, color = OmniTextDim,
+                    )
+                }
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(
+                            android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }) { Text("Turn on") }
+            }
+        }
         if (steps.isEmpty()) {
-            Box(Modifier.padding(pad).fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Text(
                     "Tell Omni the first step. It'll do it on your phone and report back, then " +
                         "you add the next one — the steps that work become the routine.",
@@ -181,7 +253,7 @@ fun TeachRoutineScreen(
             }
         } else {
             LazyColumn(
-                Modifier.padding(pad).fillMaxSize(),
+                Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -226,6 +298,7 @@ fun TeachRoutineScreen(
                     }
                 }
             }
+        }
         }
     }
 }

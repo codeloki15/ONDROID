@@ -83,6 +83,19 @@ app/src/main/java/com/locallink/pro/
    - These are `/internal/` endpoints and Composio documents `subscribe()` as a prototyping
      path, so treat breakage as expected: every failure degrades quietly (triggers stop
      arriving, nothing else breaks).
+10. **`uiautomator dump` DISABLES the accessibility service — never use it to test Automate.**
+    It registers a `UiTestAutomationService`, and Android suspends all third-party a11y
+    services while UiAutomation holds the connection, so
+    `OmniAccessibilityService.instance` goes null. Symptom: "Automate is switched off"
+    everywhere while `dumpsys accessibility` still lists the service as bound, and the
+    setting still reads enabled. Use `adb exec-out screencap -p` and fixed coordinates
+    instead. (`adb install -r` and `am force-stop` also unbind it; re-enable by toggling
+    the service off/on in Settings → Accessibility → OmniPro — `settings put secure` is
+    refused on ColorOS without WRITE_SECURE_SETTINGS.)
+11. **A taught routine must contain only actions the PILOT can perform.** Recording the
+    user's own taps captured `tap com.android.launcher:id/icon` for "open the app from the
+    home screen", a target that cannot exist at replay time, and the routine failed on step
+    1. Guided teaching avoids this by construction because Omni executes each step itself.
 
 ## Cross-cutting systems
 
@@ -91,6 +104,15 @@ app/src/main/java/com/locallink/pro/
   planner; auto-extracted from user messages (regex-gated background LLM pass).
 - **Routine library** (Settings → Learned routines): rename/run/delete learned routines,
   optional daily schedule via WorkManager self-chaining one-time work.
+- **Teaching a routine** (`ui/screens/routines/TeachRoutineScreen.kt` +
+  `service/pilot/GuidedTeachingSession.kt`): the user describes a routine one step at a
+  time and **Omni performs each step itself**, reporting back before the next is added.
+  Everything saved is therefore an action Omni can perform, replayable by construction,
+  and it goes through `ExperienceStore.save` so a taught routine is replayed, listed and
+  scheduled by the existing machinery. Failed steps stay in the list (red) rather than
+  being hidden; `undoLast` drops a step *and exactly its own actions*.
+  `RoutineRecorder` (watching the user's taps) still exists and works, but is no longer
+  the route from the Teach button — see constraint 11.
 - **Onboarding** (`ui/screens/onboarding/`): 4-step first-run wizard (gate: DataStore
   `onboarding_done`); home shows a SetupHealthBanner when the OpenRouter key is missing
   or the a11y service is off (ColorOS kills it on every reinstall).

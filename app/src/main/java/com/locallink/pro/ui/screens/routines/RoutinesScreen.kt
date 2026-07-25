@@ -155,8 +155,9 @@ fun RoutinesScreen(
             text = {
                 Column {
                     Text(
-                        "Give it a name, then do it once on your phone. Omni watches and keeps " +
-                            "the steps, so you can ask for it or schedule it later.",
+                        "Give it a name, then describe it one step at a time. Omni carries out " +
+                            "each step and reports back, and the steps that work become the " +
+                            "routine — ask for it or schedule it later.",
                         style = MaterialTheme.typography.bodyMedium, color = OmniTextDim,
                     )
                     Spacer(Modifier.height(12.dp))
