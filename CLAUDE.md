@@ -11,8 +11,12 @@ Compose) with three entry modes wired to distinct backends:
 | Voice chat | same as chat, `isVoice=true` | + on-device STT (Parakeet/sherpa-onnx) and streaming TTS (Kokoro) |
 | Automate my phone | `ChatRepository.runAgent` | planner + screen pilot via AccessibilityService; learns & replays routines. **Never routes through Composio.** |
 
-The AI brain is cloud-only via OpenRouter (BYO key). On-device LLM code
-(Qwen/FunctionGemma) exists but is dormant — not routed to.
+The AI brain is cloud-only via OpenRouter (BYO key). The dormant on-device LLM stack
+(MediaPipe/Gemma) was removed in 0.5.0 — do not reintroduce it without a routed use.
+
+Kokoro's 330 MB acoustic model is **downloaded on demand** (`TtsModelManager`), not
+bundled: the APK is ~146 MB, and the app speaks with Android's built-in TTS until the
+better voice is fetched.
 
 ## Architecture map
 
@@ -91,7 +95,12 @@ app/src/main/java/com/locallink/pro/
     instead. (`adb install -r` and `am force-stop` also unbind it; re-enable by toggling
     the service off/on in Settings → Accessibility → OmniPro — `settings put secure` is
     refused on ColorOS without WRITE_SECURE_SETTINGS.)
-11. **A taught routine must contain only actions the PILOT can perform.** Recording the
+11. **`traceStepOf` returning null means "trace broken" — the whole routine is then
+    discarded.** So a non-traceable-but-harmless action (like `find`, whose scroll count
+    is meaningless on replay) must be skipped explicitly at the call site, not by
+    returning null. Getting this wrong means one `find()` silently prevents any routine
+    from being saved.
+12. **A taught routine must contain only actions the PILOT can perform.** Recording the
     user's own taps captured `tap com.android.launcher:id/icon` for "open the app from the
     home screen", a target that cannot exist at replay time, and the routine failed on step
     1. Guided teaching avoids this by construction because Omni executes each step itself.
