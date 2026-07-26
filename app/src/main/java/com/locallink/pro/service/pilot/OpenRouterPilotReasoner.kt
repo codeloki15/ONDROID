@@ -67,6 +67,30 @@ class OpenRouterPilotReasoner(
             .put("model", model).put("messages", messages)
             .put("tools", PilotActionSchema.toolsJson())
             .put("tool_choice", "required").put("temperature", 0.2)
+            // Think hard. Choosing which of eighty elements advances the task is the one place in
+            // this app where deliberation earns its keep, so slowness is not paid for out of
+            // reasoning quality — it is paid for out of how fast the tokens come back.
+            .put("reasoning", JSONObject().put("effort", "high"))
+            // Which provider serves the request dominates everything else. Measured on one run,
+            // same model, same prompt size:
+            //   Wafer      78 out /  2.1s, 346 out / 6.1s  →  37-57 tok/s
+            //   Fireworks 143 out / 16.0s, 154 out / 13.2s →   9-12 tok/s
+            // A 4-5x spread, and `sort: throughput` alone still landed on the slow one twice —
+            // ranking prefers but does not exclude. preferred_min_throughput is what actually
+            // pushes past a provider that cannot keep up, and it matters MORE with high reasoning
+            // effort, not less, because every reasoning token is an output token to be generated.
+            //
+            // A floor rather than a named allow-list: naming Wafer would be faster today and
+            // broken the day it is busy. require_parameters is the guard that keeps a
+            // speed-ranked pool from including someone who ignores `tools` — this whole loop is
+            // function calling. Fallbacks stay on, so a thin pool degrades instead of failing.
+            .put(
+                "provider",
+                JSONObject()
+                    .put("sort", "throughput")
+                    .put("require_parameters", true)
+                    .put("preferred_min_throughput", JSONObject().put("p90", 40)),
+            )
         val req = Request.Builder().url("https://openrouter.ai/api/v1/chat/completions")
             .addHeader("Authorization", "Bearer $key")
             .addHeader("HTTP-Referer", "https://omnipin.app").addHeader("X-Title", "OmniPin")
@@ -76,9 +100,17 @@ class OpenRouterPilotReasoner(
             val text = resp.body?.string().orEmpty()
             // Where a step's wall-clock actually goes. The reasoner call dominates by so much
             // that trimming settle delays or element counts is rounding error next to it.
+            // Token counts, not just wall-clock: they are how you tell "the provider is slow" from
+            // "we asked the model to think for 800 tokens before answering". reasoning_tokens is
+            // the one that settles it.
+            val u = runCatching { JSONObject(text).optJSONObject("usage") }.getOrNull()
+            val reasoning = u?.optJSONObject("completion_tokens_details")?.optInt("reasoning_tokens")
+            val served = runCatching { JSONObject(text).optString("provider") }.getOrNull()
             Log.d(TAG, "reason ${SystemClock.uptimeMillis() - startedAt}ms " +
                 "elements=${shown.size}/${elements.size} shot=${screenshot?.size ?: 0}B " +
-                "history=${history.size}")
+                "history=${history.size} model=$model via=$served " +
+                "in=${u?.optInt("prompt_tokens")} out=${u?.optInt("completion_tokens")} " +
+                "reasoning=$reasoning")
             if (!resp.isSuccessful) return "ask" to """{"question":"Cloud error ${resp.code}; retry?"}"""
             val msg = JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
                 ?: return "ask" to """{"question":"No response; retry?"}"""

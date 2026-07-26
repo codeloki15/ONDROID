@@ -94,9 +94,12 @@ class OpenRouterPilotReflector(
             // still pays for one token; this only binds the ones that think first, and reflection
             // no longer sits on the critical path where their thinking would be felt.
             .put("max_tokens", 1500)
-            // Keep that thinking short where the model supports the knob. OpenRouter drops it for
-            // models that don't, so this is safe to send unconditionally.
-            .put("reasoning", JSONObject().put("effort", "low"))
+            // No thinking at all. This is a two-way classification against two lists of labels —
+            // there is nothing here worth deliberating over, and the deliberation was the whole
+            // problem: reasoning tokens are output tokens, so they were both the latency (up to
+            // 5.5s) and the truncation that made the verdict unusable. The generous max_tokens
+            // above stays as insurance for providers that ignore this knob.
+            .put("reasoning", JSONObject().put("effort", "none"))
         val req = Request.Builder().url("https://openrouter.ai/api/v1/chat/completions")
             .addHeader("Authorization", "Bearer $key")
             .addHeader("HTTP-Referer", "https://omnipin.app").addHeader("X-Title", "OmniPin")
