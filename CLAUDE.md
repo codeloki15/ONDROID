@@ -37,7 +37,8 @@ app/src/main/java/com/locallink/pro/
 ├── service/notify/OmniNotificationListener.kt  # notification triggers (rules in Room) → speak/agent
 ├── service/voice/
 │   ├── VoiceLoopController.kt             # hands-free "Hey Omni" state machine (mic is single-owner!)
-│   ├── WakeWordEngine.kt                  # sherpa-onnx KeywordSpotter (assets/kws)
+│   ├── WakeWordEngine.kt                  # owns the mic; delegates detection to WakeWordDetector
+│   ├── OpenWakeWordDetector.kt            # purpose-trained "hey omni" model (assets/oww, ORT)
 │   ├── ParakeetSttEngine.kt + SttModelManager.kt   # on-device STT (~670MB, downloaded in-app)
 │   └── KokoroTtsService.kt                # streaming TTS (assets/kokoro-en-v0_19)
 └── ui/screens/                            # Compose: sessions (home + setup-health banner), chat,
@@ -53,9 +54,30 @@ app/src/main/java/com/locallink/pro/
 2. **The mic is single-owner** — wake engine, STT, TTS are time-exclusive.
    `WakeWordEngine.stop()` must stay synchronous (joins its worker) and be called
    off-main; otherwise STT gets `ERROR_NO_MATCH` from mic contention.
-3. **KWS models must be the fp32 export** of
-   `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01` — the `-mobile` int8 encoder
-   has an incompatible streaming export and aborts natively in `KeywordSpotter.decode`.
+3. **The openWakeWord embedding model is WRONG at batch size 1 under onnxruntime.** It
+   returns materially different values (~20 on individual dimensions) for a batch of 1 than
+   for any batch >= 2, and batch >= 2 is the correct answer — it matches the batch feature
+   path every classifier was trained on. Streaming inference naturally wants batch 1, which
+   is precisely the broken case, so `OpenWakeWordDetector.embedWindow` submits each window
+   TWICE and keeps row 0. This is not a micro-optimisation to "clean up". Symptom if
+   removed: the detector runs, logs nothing, burns battery, and never fires. openWakeWord's
+   own ONNX streaming path has this bug — `predict_clip` scores **0.0000** on the project's
+   own `alexa_test.wav` where the batch path scores 1.0000 (its default framework is tflite,
+   so the ONNX path is under-tested). `OpenWakeWordDetectorTest` pins this down against
+   recorded reference scores; regenerate them with `tools/wakeword-training/make_test_fixture.py`.
+   **The same bug bites from the training side**, which is why `train_shim.py` patches
+   `_get_embeddings_from_melspec`: openwakeword's CPU feature path is
+   `pool.map(self._get_embeddings_from_melspec, batch)` — one window per call, i.e. batch 1 —
+   while the CUDA branch beside it passes the whole batch. Models trained on a GPU (every
+   released one) therefore get correct features and CPU-trained models silently do not. Train
+   without that patch and the result looks fine against its own feature file (0.73 recall) yet
+   scores 0/64 on real audio, because the phone computes different numbers than training did.
+   Related: the melspectrogram ONNX ends in `ReduceMax`→`Sub`→`Clip` (librosa's
+   `power_to_db(top_db=80)`), so its floor depends on the global max of *whatever slice you
+   pass it*. Digital silence (-inf dB) makes that floor bind, and whole-clip vs streaming mel
+   then differ by ~104; with any real noise floor they agree exactly. Hence `train_shim.py`
+   also pads training clips with ~-70 dBFS noise instead of the zeros
+   `create_fixed_size_clip` uses — real microphones are never digitally silent.
 4. **Agent runs are serialized** (`ChatRepository.serialized`) — two concurrent pilot
    runs fight over the one screen and both spiral into replans.
 5. Composio powers **chat and voice only**; Automate's planner emits only chat/pilot
@@ -180,8 +202,30 @@ app/src/main/java/com/locallink/pro/
 ## Model assets (Git LFS)
 
 `app/libs/sherpa-onnx-1.12.23.aar`, `assets/kokoro-en-v0_19/{model.onnx,voices.bin}`,
-`assets/kws/*.onnx` are tracked via **Git LFS**. `assets/kws/keywords.txt` is the
-custom "Hey Omni" keyword spec — never overwrite it with a release tarball's copy.
+`assets/oww/*.onnx` are tracked via **Git LFS**.
+
+`assets/oww/` holds the wake-word stack: `melspectrogram.onnx` + `embedding_model.onnx`
+(openWakeWord's fixed feature extractors, shipped verbatim) and `hey_omni.onnx`, trained
+by `tools/wakeword-training/setup_and_train.sh`. Together ~2.3 MB, replacing the ~13 MB
+sherpa zipformer KWS that used to live in `assets/kws/`.
+
+**`onnxruntime-android` is pinned to 1.17.1 on purpose** — the sherpa-onnx AAR bundles its
+own `libonnxruntime.so` of exactly that version and `jniLibs { pickFirsts }` keeps only one
+of the two. Bumping one without the other leaves ORT's JNI wrapper resolving against a
+runtime it wasn't built for.
+
+Two things about `hey_omni.onnx` that `setup_and_train.sh` now fixes after every export,
+because torch's exporter gets both wrong for this target and each fails at load time with
+no useful message:
+- **IR version.** torch 2.13 writes `ir_version: 10`; ORT 1.17.1 accepts at most 9. The
+  opset (18) is fine, so only the envelope field is rewritten — no weights change.
+- **External data.** The exporter puts the weights in a sidecar `hey_omni.onnx.data` and
+  leaves a ~16 KB graph behind. Copy just the `.onnx` into `assets/` and you ship a model
+  with no weights. It is re-saved inline (~426 KB) and the sidecar deleted.
+
+`OpenWakeWordDetectorTest` runs against the desktop build of the *same* ORT 1.17.1, which is
+what caught both — a model that loads under the training venv's newer onnxruntime can still
+be unloadable on the phone.
 
 ## Build & test
 

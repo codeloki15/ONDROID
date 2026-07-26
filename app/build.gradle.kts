@@ -65,12 +65,27 @@ android {
     androidResources {
         noCompress += listOf("onnx", "bin", "txt", "fst", "litertlm", "task")
     }
+
+    testOptions {
+        unitTests {
+            // OpenWakeWordDetector logs via android.util.Log; without this the unmocked
+            // android.jar throws instead of no-oping, and the JVM test can't construct it.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
     // Sherpa-ONNX (on-device TTS)
     implementation(files("libs/sherpa-onnx-1.12.23.aar"))
 
+    // ONNX Runtime Java API, for the openWakeWord "Hey Omni" model. The version is
+    // pinned to 1.17.1 DELIBERATELY: the sherpa-onnx AAR above bundles its own
+    // libonnxruntime.so of exactly that version, and jniLibs `pickFirsts` keeps only
+    // one of the two. Matching versions makes that collision a no-op — bumping this
+    // without rebuilding sherpa means ORT's JNI wrapper resolves against a different
+    // runtime than it was built for.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
 
     // CameraX (vision input)
     implementation("androidx.camera:camera-core:1.4.1")
@@ -137,6 +152,9 @@ dependencies {
     // Real org.json for JVM unit tests — Android's bundled org.json is a stub that
     // throws at runtime, so pilot tests using JSONObject need the actual impl.
     testImplementation("org.json:json:20240303")
+    // Desktop ONNX Runtime so the wake-word feature pipeline can be checked against the
+    // Python reference on the JVM. Same version as the Android artifact above.
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.17.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.11.00"))

@@ -24,8 +24,12 @@ python -c "import openwakeword" 2>/dev/null || {
   pip -q install --upgrade pip
   # datasets pinned <4: newer versions delegate audio decode to torchcodec (needs
   # system FFmpeg); 3.x decodes via soundfile, which fetch_audio.py relies on.
-  pip -q install openwakeword torch torchaudio onnx onnxruntime piper-phonemize-cross \
-      soundfile scipy tqdm requests pyyaml mutagen torchinfo torchmetrics speechbrain \
+  # scipy pinned <1.17: it dropped `special.sph_harm`, which `acoustics` imports at
+  # module scope — and openwakeword.data imports acoustics, so train.py won't even load.
+  # onnxscript: torch >= 2.9's onnx exporter goes through it, and train.py's very last
+  # act is the ONNX export — without it you lose the whole run at the finish line.
+  pip -q install openwakeword torch torchaudio onnx onnxruntime onnxscript piper-phonemize-cross \
+      soundfile "scipy<1.17" tqdm requests pyyaml mutagen torchinfo torchmetrics speechbrain \
       audiomentations torch-audiomentations acoustics pronouncing "datasets==3.6.0" deep-phonemizer
 }
 # piper-sample-generator's top-level imports need piper-tts even on the .pt path.
@@ -86,6 +90,10 @@ if [ "$(have audioset_16k)" -lt 1400 ]; then
   python fetch_audio.py agkphysics/AudioSet train audioset_16k as 1500 \
     || echo "[warn] audioset stream incomplete — continuing with what landed"
 fi
+# openwakeword scans these directories with os.scandir and hands EVERY entry to
+# torchaudio — a stray dotfile makes augmentation die on "Format not recognised".
+find mit_rirs audioset_16k fma_16k -type f ! -name "*.wav" -delete 2>/dev/null || true
+
 log "augmentation assets: rirs=$(have mit_rirs) audioset=$(have audioset_16k)"
 if [ "$(have mit_rirs)" -lt 50 ] || [ "$(have audioset_16k)" -lt 200 ]; then
   echo "[fatal] too few augmentation clips — training would produce a model that only"
@@ -120,12 +128,28 @@ cfg = {
     "background_paths_duplication_rate": [1] * len(bgs),
     "false_positive_validation_data_path": "./data/validation_set_features.npy",
     "feature_data_files": {"ACAV100M_sample": "./data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"},
-    "batch_n_per_class": {"ACAV100M_sample": 1024, "adversarial_negative": 50, "positive": 50},
+    # Stock is 1024/50/50; 100 positives roughly doubles their share. The POSITIVE
+    # FRACTION, far more than the negative weight, is what drives the false-positive rate:
+    # measured on correct features, 400 positives gave 0.79 recall at 218 fp/hr, 200 gave
+    # 0.71 at 33 fp/hr, and 50 gave 0.53 at 1.2 fp/hr. 100 sits at 0.54 recall / 1.4 fp/hr.
+    # Change this before reaching for max_negative_weight, and re-measure both numbers.
+    "batch_n_per_class": {
+        "ACAV100M_sample": int(os.environ.get("N_ACAV", 1024)),
+        "adversarial_negative": 50,
+        "positive": int(os.environ.get("N_POSITIVE", 100)),
+    },
     "model_type": "dnn",
-    "layer_size": 32,
+    # 64 rather than the stock 32: still a trivial MLP on-device, but the extra capacity
+    # helps it separate "hey omni" from the adversarial negatives without leaning so hard
+    # on negative weighting.
+    "layer_size": 64,
     "steps": 50000,
-    "max_negative_weight": 1500,
-    "target_false_positives_per_hour": 0.2,
+    # auto_train DOUBLES this after any sequence that misses the fp target, so it
+    # compounds. Every "obvious" tuning conclusion drawn before train_shim.py fixed the
+    # batch-1 embedding bug was measured against corrupted features and did not transfer —
+    # if you retune, re-measure with evaluate_model.py rather than trusting these comments.
+    "max_negative_weight": int(os.environ.get("MAX_NEGATIVE_WEIGHT", 3000)),
+    "target_false_positives_per_hour": 0.5,
 }
 yaml.safe_dump(cfg, open("hey_omni.yml", "w"))
 print("config written; backgrounds:", bgs)
@@ -150,6 +174,12 @@ PY
 
 export PYTHONPATH="$ROOT/piper-sample-generator"
 
+# Piper's VITS decoder calls a @torch.jit.script helper. Once the profiling executor
+# decides to fuse it, TorchScript's fuser raises "Unknown device for graph fuser" on
+# MPS — so generation dies partway through, not at the first batch. Disabling the JIT
+# runs those helpers eagerly; MPS still does the actual work (20k clips in ~4 min).
+export PYTORCH_JIT=0
+
 # Base feature models (melspectrogram + speech embedding) used by the trainer.
 python - <<'EOF'
 import openwakeword.utils as u
@@ -158,13 +188,30 @@ except TypeError: u.download_models([])
 EOF
 
 # ── Stage 7: train ──────────────────────────────────────────────────────
-TRAIN="$(python -c 'import openwakeword,os; print(os.path.join(os.path.dirname(openwakeword.__file__), "train.py"))')"
+# train_shim.py runs openwakeword's train.py with torchaudio's load/info backed by
+# soundfile — torchaudio >= 2.9 otherwise demands torchcodec (and a system FFmpeg) for
+# every clip it augments. See the shim's docstring.
+TRAIN="train_shim.py"
 mkdir -p trained
 
 log "phase: generate_clips"
 python "$TRAIN" --training_config hey_omni.yml --generate_clips
 log "phase: augment_clips (computes openwakeword features)"
-python "$TRAIN" --training_config hey_omni.yml --augment_clips
+# train.py skips this whole phase if it finds ANY existing feature file ("Openwakeword
+# features already exist"). A run that died partway — as one did on the torchcodec
+# problem, after writing only the positives — therefore looks complete on resume, and
+# training then fails much later on a missing negative_features_train.npy. Require the
+# full set, and force a recompute when it isn't there.
+FEAT=trained/hey_omni
+AUG_ARGS=""
+for f in positive_features_train positive_features_test negative_features_train negative_features_test; do
+  if [ ! -f "$FEAT/$f.npy" ]; then AUG_ARGS="--overwrite"; break; fi
+done
+if [ -n "$AUG_ARGS" ]; then
+  log "feature set incomplete — recomputing all of it"
+  rm -f "$FEAT"/*_features_*.npy
+fi
+python "$TRAIN" --training_config hey_omni.yml --augment_clips $AUG_ARGS
 log "phase: train_model"
 # The last thing train.py does is convert the ONNX to tflite via onnx_tf, which is
 # unmaintained and does not install on modern Python/TF. The ONNX export happens FIRST,
@@ -179,4 +226,33 @@ if [ ! -f trained/hey_omni.onnx ]; then
 fi
 
 log "training complete"
+
+# torch 2.13's exporter writes ir_version 10, which onnxruntime 1.17.1 refuses to load
+# ("Failed to load model ... Unsupported model IR version"). The app is pinned to 1.17.1
+# because the sherpa-onnx AAR bundles that exact runtime, so an un-downgraded model fails
+# on the phone AND in OpenWakeWordDetectorTest. The opset (18) is supported; only the IR
+# envelope is too new, so rewriting the field is sufficient — no weights change.
+# It ALSO writes the weights to a sidecar hey_omni.onnx.data and leaves the .onnx as a
+# bare graph. Copying just the .onnx into assets/ then yields a 16 KB file with no weights
+# that fails to load with no hint as to why. Re-saving inline makes the artefact
+# self-contained, which is the only form that survives being copied into an APK.
+python - <<'PY'
+import os
+import onnx
+
+m = onnx.load("trained/hey_omni.onnx")  # follows the sidecar if there is one
+if m.ir_version > 9:
+    print(f"ir_version {m.ir_version} -> 9 (onnxruntime 1.17.1 rejects newer)")
+    m.ir_version = 9
+onnx.save(m, "trained/hey_omni.onnx")   # inline: no external data
+sidecar = "trained/hey_omni.onnx.data"
+if os.path.exists(sidecar):
+    os.remove(sidecar)                  # stale now, and a trap if left behind
+print(f"self-contained model: {os.path.getsize('trained/hey_omni.onnx')} bytes")
+PY
 ls -la trained/hey_omni.onnx
+
+# Measure the exported model and refuse a dead one — auto_train optimises for false
+# positives and will cheerfully return something with ~0.14 recall. See evaluate_model.py.
+log "phase: evaluate"
+python evaluate_model.py
