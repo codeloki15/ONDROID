@@ -11,6 +11,12 @@ _models_cache/
 externals/
 UI_images_reference/
 docs/
+# NOT `tools/` — an unanchored directory pattern matches at EVERY depth, so it also swallowed
+# app/src/main/java/.../service/llm/tools/ and its test package. The 27 device tools already in
+# there survived only because git ignores .gitignore for files it already tracks; every NEW tool
+# and every new test beside them was silently refused by `git add`. It also contradicted the
+# wake-word training scripts below, which are meant to be in the repo. Heavy generated
+# subdirectories are listed individually instead.
 
 # FunctionGemma weights (on-device tool-routing model, currently dormant) — 1.6GB,
 # exceeds GitHub's 100MB blob limit. Kept locally outside the repo.
@@ -35,6 +41,8 @@ tools/wakeword-training/venv/
 tools/wakeword-training/piper-sample-generator/
 tools/wakeword-training/data/
 tools/wakeword-training/generated/
+# Generated training clips — thousands of small wavs, reproducible from the scripts.
+tools/wakeword-training/trained/
 
 # Internal/dev-only content kept local (not part of the public repo)
 server/

@@ -103,7 +103,25 @@ class DeviceToolFastPath @Inject constructor(
             Log.w(TAG, "tool '$name' reported failure, falling through to the pilot: $result")
             return null
         }
-        return Outcome(reply = result, toolName = name)
+        return Outcome(reply = humanReply(result), toolName = name)
+    }
+
+    /**
+     * What the user reads. Prefers a tool's own `summary` over its machine payload.
+     *
+     * Tools return JSON because the chat tool-loop consumes it, but on this path there is no
+     * second model turn to phrase it — the tool result IS the reply. So "turn the volume up"
+     * answered with `{"ok":true,"stream":"music","percent":23,...}` and "what time zone am I in"
+     * with a raw ISO-8601 dump. Same defect as PlanExecutor's bare "Done.": the work was right and
+     * the presentation threw it away.
+     *
+     * A `summary` field rather than a phrasing round-trip, because a second LLM call would cost
+     * more than the whole hop this path exists to save. Tools without one are unchanged.
+     */
+    private fun humanReply(result: String): String {
+        if (!result.trimStart().startsWith("{")) return result
+        val summary = runCatching { JSONObject(result).optString("summary") }.getOrNull()
+        return summary?.takeIf { it.isNotBlank() } ?: result
     }
 
     /** Every registered tool the model is allowed to pick from, as OpenAI function schemas. */
