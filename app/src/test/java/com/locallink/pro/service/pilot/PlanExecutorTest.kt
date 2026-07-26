@@ -83,6 +83,57 @@ class PlanExecutorTest {
         assertEquals("Stopped.", (events.last() as AgentEvent.Final).text)
     }
 
+    @Test fun theFinalMessageIsWhatThePilotFoundNotTheWordDone() = runTest {
+        // Observed on device: "how much storage is free" navigated to the right screen, read the
+        // figure, and answered the user "Done." The pilot's report was collected and then thrown
+        // away here. A question answered with "Done." is a failed task, however well it drove.
+        val planner = PlanSource { _, _ -> Plan(listOf(
+            Todo("check storage", Channel.PILOT, false, null),
+        )) }
+        val runner = object : ChannelRunner {
+            override suspend fun chat(todo: String) = "ok"
+            override suspend fun composio(todo: String) = "ok"
+            override suspend fun pilot(todo: String): String? = "95.4 GB of 128 GB is free."
+            override suspend fun requestInput(question: String, reason: String?): String? = null
+        }
+        val events = PlanExecutor(planner, runner).run("how much storage is free").toList()
+        assertEquals("95.4 GB of 128 GB is free.", (events.last() as AgentEvent.Final).text)
+    }
+
+    @Test fun everyLegsFindingSurvivesIntoTheFinalMessage() = runTest {
+        // A multi-step automation achieves several things; the user asked to hear all of them.
+        val planner = PlanSource { _, _ -> Plan(listOf(
+            Todo("find the price", Channel.PILOT, false, null),
+            Todo("check delivery", Channel.PILOT, false, null),
+        )) }
+        val replies = ArrayDeque(listOf("Lavazza Gusto Crema is ₹649.", "Delivery is free by Tuesday."))
+        val runner = object : ChannelRunner {
+            override suspend fun chat(todo: String) = "ok"
+            override suspend fun composio(todo: String) = "ok"
+            override suspend fun pilot(todo: String): String? = replies.removeFirst()
+            override suspend fun requestInput(question: String, reason: String?): String? = null
+        }
+        val text = (PlanExecutor(planner, runner).run("price and delivery").toList()
+            .last() as AgentEvent.Final).text
+        assertTrue("first leg's finding is missing: $text", text.contains("₹649"))
+        assertTrue("second leg's finding is missing: $text", text.contains("Tuesday"))
+    }
+
+    @Test fun aRunThatReportsNothingStillSaysDone() = runTest {
+        // The fallback has to stay: a silent pilot must not produce an empty bubble.
+        val planner = PlanSource { _, _ -> Plan(listOf(
+            Todo("toggle wifi", Channel.PILOT, false, null),
+        )) }
+        val runner = object : ChannelRunner {
+            override suspend fun chat(todo: String) = "ok"
+            override suspend fun composio(todo: String) = "ok"
+            override suspend fun pilot(todo: String): String? = "Done."
+            override suspend fun requestInput(question: String, reason: String?): String? = null
+        }
+        val events = PlanExecutor(planner, runner).run("turn on wifi").toList()
+        assertEquals("Done.", (events.last() as AgentEvent.Final).text)
+    }
+
     @Test fun replansWhenPilotTodoGetsStuck() = runTest {
         var planCount = 0
         val planner = PlanSource { _, _ ->

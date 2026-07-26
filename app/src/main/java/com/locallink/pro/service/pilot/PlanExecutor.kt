@@ -31,6 +31,9 @@ class PlanExecutor(
         var plan = planner.plan(task, priorRoutines(task))
         emit(AgentEvent.Plan(plan.todos))
         val done = ArrayList<String>()
+        // What the pilot actually reported, kept separately from `done` because that one is
+        // prompt context ("todo → report") while this is the user's answer.
+        val reports = ArrayList<String>()
         var steps = 0
         var replans = 0
         var i = 0
@@ -67,7 +70,9 @@ class PlanExecutor(
             if (ok) {
                 emit(AgentEvent.TodoStatus(i, todo.text, done = true))
                 // Carry the pilot's report forward — replans and later todos build on findings.
-                done.add(if (report.isNullOrBlank() || report == "Done.") todo.text else "${todo.text} → $report")
+                val said = report?.takeIf { it.isNotBlank() && it != "Done." }
+                done.add(if (said == null) todo.text else "${todo.text} → $said")
+                if (said != null) reports.add(said)
                 i++
             } else {
                 // The user pressing STOP surfaces as a failed pilot leg — abort, don't replan.
@@ -83,9 +88,20 @@ class PlanExecutor(
                 i = 0
             }
         }
-        // Only emit a terminal "Done." when the plan actually did on-device work; a pure chat
-        // answer is already the user-facing reply, so a trailing "Done." is just noise.
-        if (plan.todos.any { it.channel == Channel.PILOT }) emit(AgentEvent.Final("Done."))
-        else emit(AgentEvent.Final(""))
+        // Report what the run ACHIEVED, not that it ended.
+        //
+        // This used to emit a bare "Done." for any plan containing on-device work, which threw
+        // away the very reports it had just collected: "how much storage is free" navigated to
+        // the right screen, read the figure, and answered the user with the word "Done." The
+        // pilot's own prompt already insists the value goes in done(result) — that instruction
+        // was being honoured and then discarded one layer up.
+        //
+        // Every leg's report is kept, since a multi-step plan achieves several things and the
+        // user asked to hear all of them. "Done." survives only as the fallback for a run that
+        // genuinely reported nothing. A pure chat answer is already the user-facing reply, so a
+        // trailing line there would just be noise.
+        if (plan.todos.any { it.channel == Channel.PILOT }) {
+            emit(AgentEvent.Final(reports.distinct().joinToString("\n").ifBlank { "Done." }))
+        } else emit(AgentEvent.Final(""))
     }
 }
