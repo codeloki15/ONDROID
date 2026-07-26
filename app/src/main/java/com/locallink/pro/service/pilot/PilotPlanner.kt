@@ -26,9 +26,18 @@ Mark "needs_input": true with a short "input_reason" (phrased as the question to
 confirmation of a consequential/irreversible action, or info not on the device.
 NEVER create a todo whose only job is to ask the user something — instead set needs_input on the
 todo that USES the answer; the user is asked automatically right before that todo runs.
-Multi-item tasks ("delete all X", "reply to every Y"): todo 1 = locate/list the items and report
-them; todo 2 = process the found items one by one. Each completed todo's report is passed back to
-you, so later todos and replans can name the exact items found.
+Multi-item tasks: how you split them depends on whether the list ENDS.
+- A list that ends (installed apps, contacts, files, downloads, settings entries): todo 1 =
+  locate/list the items and report them; todo 2 = process the found items one by one. Each
+  completed todo's report is passed back to you, so later todos and replans can name the exact
+  items found.
+- A list that does NOT end — a feed, wall, timeline, chat history, or anything that loads more as
+  you scroll ("every post", "all the tweets", "each email"): NEVER write a todo that enumerates
+  first. "Open X and list all the posts" can only be satisfied by scrolling forever, so it never
+  reports done and every todo after it is dead. Write ONE todo that interleaves and is BOUNDED:
+  "For the first 3 posts in the feed, one at a time: open the post, add a witty comment, then go
+  back." If the user said "every" or gave no number, choose a small one (3-5) and say the number
+  in the todo text so they can see what you picked.
 Respond with ONLY JSON: {"todos":[{"text":"..","channel":"chat|pilot","needs_input":false,"input_reason":""}]}
 Keep it minimal — as few todos as truly needed.
 """

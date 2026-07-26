@@ -26,6 +26,26 @@ class OpenRouterPilotReasoner(
          * reachable through find(text) instead of being pasted into every step.
          */
         private const val MAX_ELEMENTS = 80
+
+        /**
+         * What to say when the element list is capped — and pointedly NOT "scroll".
+         *
+         * The old wording was "N more elements are on this screen but not listed — scroll or use
+         * find(text)". On a feed that is a trap with no exit. Scrolling a LinkedIn timeline
+         * reveals fresh elements, so the count never drops, so the hint fires again, so it
+         * scrolls again. Observed exactly that: 31 steps of nothing but Scroll, on screens
+         * reporting 80/109 and 80/96, never once tapping a comment button.
+         *
+         * The list is capped, not cut off at the bottom, and saying so is the whole fix: the
+         * missing elements are not "further down", so scrolling cannot be the way to reach them.
+         */
+        fun omissionNote(shown: Int, total: Int): String {
+            if (total <= shown) return ""
+            return "(This screen has $total interactive elements; only $shown are listed. The " +
+                "list is CAPPED, not cut off at the bottom — scrolling will not reveal the rest " +
+                "and on a feed it just loads more. To reach something specific by name, use " +
+                "find(text).)\n"
+        }
     }
 
     private val json = "application/json; charset=utf-8".toMediaType()
@@ -48,10 +68,7 @@ class OpenRouterPilotReasoner(
                 "text",
                 "Task: $task\n\nHistory:\n${history.joinToString("\n").ifBlank { "(none)" }}\n\n" +
                     "On-screen elements:\n$elementsJson\n" +
-                        (if (omitted > 0)
-                            "($omitted more elements are on this screen but not listed — " +
-                                "scroll or use find(text) if what you need isn't here.)\n"
-                        else "") +
+                        omissionNote(shown.size, elements.size) +
                         "\nChoose ONE action.",
             ))
             if (screenshot != null) {
