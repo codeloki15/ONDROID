@@ -36,6 +36,8 @@ class MemoryPilot(
      * done(result); this gives the deterministic path the same courtesy.
      */
     private val summarise: (suspend (String) -> String?)? = null,
+    /** Second opinion on where each navigation landed; null → no reflection (see PilotController). */
+    private val reflector: PilotReflector? = null,
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
         var primed: List<String> = emptyList()
@@ -78,6 +80,7 @@ class MemoryPilot(
                 onTrace = { steps -> runCatching { save(task, steps) } },
                 askUser = askUser,
                 primedHistory = primed,
+                reflector = reflector,
             ).run(task),
         )
     }.flowOn(Dispatchers.IO)

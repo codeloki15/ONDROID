@@ -90,6 +90,7 @@ class ChatRepository @Inject constructor(
         bump = { id -> experiences.bump(id) },
         askUser = askUser,
         summarise = { task -> reportOutcome(task, actuator) },
+        reflector = com.locallink.pro.service.pilot.OpenRouterPilotReflector(settings),
     )
 
     /**

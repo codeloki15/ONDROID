@@ -52,6 +52,11 @@ class PilotController(
     private val askUser: (suspend (String) -> String?)? = null,
     /** Notes injected at the start of history — e.g. a partially replayed routine's steps. */
     private val primedHistory: List<String> = emptyList(),
+    /**
+     * Second opinion on where each navigation landed. Null → the loop behaves exactly as it did
+     * before reflection existed, which is what the unit tests and any cost-sensitive caller want.
+     */
+    private val reflector: PilotReflector? = null,
 ) {
     fun run(task: String): Flow<AgentEvent> = flow {
         val history = ArrayList<String>(primedHistory)
@@ -60,6 +65,7 @@ class PilotController(
         var lastActionSig: String? = null
         var stuckCount = 0
         var recoveryTried = false   // one Back-to-escape attempt per run, not a loop
+        var rollbacks = 0           // wrong-page undos so far; bounded so back/forward can't cycle
         var step = 0
         // Mechanical repeat-blocker (pi-style guard hook): same action on the same screen
         // twice is never executed again — the model is told to choose differently.
@@ -174,15 +180,6 @@ class PilotController(
             emit(AgentEvent.ToolCall(id, name, args, true))
             val (ok, note) = execute(action, elements)
             emit(AgentEvent.ToolResult(id, name, if (ok) note else "failed: $note", ok))
-            if (ok) {
-                // find() is a search, not a step: skip it without marking the trace broken.
-                // Returning null here would have meant a single find() silently prevented the
-                // whole routine from ever being saved.
-                if (action !is PilotAction.FindText) {
-                    val ts = traceStepOf(action, elements)
-                    if (ts != null) trace.add(ts) else traceBroken = true
-                }
-            }
             // Let the screen settle after actions that navigate/transition, so the NEXT perceive
             // (and screenshot) reflect the new screen — this is what stops the model re-issuing the
             // same tap because the old screen was still showing. App launches are the slowest
@@ -190,18 +187,51 @@ class PilotController(
             if (ok && action.changesScreen()) {
                 settle(if (action is PilotAction.LaunchApp) LAUNCH_SETTLE_MS else SETTLE_MS)
             }
+
             // Outcome-annotated note (pi lesson: results carry verdict + post-state, never a
             // bare "tapped X"): tell the model where the action LANDED, or that it did nothing.
-            history.add(
-                if (!ok) note
-                else if (!action.changesScreen()) note
+            var rolledBack = false
+            val outcome: String = if (!ok || !action.changesScreen()) note else {
+                val after = actuator.perceive()
+                val afterSig = after.joinToString("|") { "${it.text}:${it.bounds.joinToString(",")}" }
+                if (afterSig == screenSig) "$note → screen did NOT change (no effect)"
                 else {
-                    val after = actuator.perceive()
-                    val afterSig = after.joinToString("|") { "${it.text}:${it.bounds.joinToString(",")}" }
-                    if (afterSig == screenSig) "$note → screen did NOT change (no effect)"
-                    else "$note → now on: ${screenTitle(after)}"
-                },
-            )
+                    val landed = "now on: ${screenTitle(after)}"
+                    val wrong = rollbacks < MAX_ROLLBACKS && navigated(elements, after) &&
+                        reflect(task, note, elements, after) == Reflection.WRONG_PAGE
+                    if (!wrong) "$note → $landed" else {
+                        rollbacks++
+                        rolledBack = true
+                        actuator.back()
+                        settle(SETTLE_MS)
+                        // Deliberately NOT clearing `attempted` here, unlike the stuck-guard
+                        // recovery above. That one escapes to a screen it has never seen; this
+                        // one returns to the screen it just left, and the entry it would erase
+                        // is precisely the knowledge that this element leads somewhere wrong.
+                        // Leaving it means a model that re-taps is blocked on the second try
+                        // instead of buying another rollback.
+                        emit(AgentEvent.ToolResult(
+                            UUID.randomUUID().toString(), "reflect",
+                            "$landed — not where the task needs to go; went back", true,
+                        ))
+                        "$note → $landed, which is NOT where this task needs to go, so I went " +
+                            "BACK. Take a DIFFERENT route to the goal."
+                    }
+                }
+            }
+            if (ok && !rolledBack) {
+                // find() is a search, not a step: skip it without marking the trace broken.
+                // Returning null here would have meant a single find() silently prevented the
+                // whole routine from ever being saved.
+                //
+                // A rolled-back action is skipped too: it is a wrong turn we already undid, and
+                // baking it into a routine would teach the detour as the route.
+                if (action !is PilotAction.FindText) {
+                    val ts = traceStepOf(action, elements)
+                    if (ts != null) trace.add(ts) else traceBroken = true
+                }
+            }
+            history.add(outcome)
         }
         emit(AgentEvent.Final("Stopped after $maxSteps steps."))
     }.flowOn(Dispatchers.IO) // network (reasoner) + a11y calls must run off the main thread
@@ -282,6 +312,35 @@ class PilotController(
         }
         return false to "\"$query\" not found after $FIND_MAX_SCROLLS scrolls"
     }
+
+    /**
+     * Did the action move to a different page, or just change this one?
+     *
+     * Reflection costs a model call, so it is only spent where landing on the wrong page is
+     * actually possible. A scroll that reveals more of the same list, or a field that gained
+     * text, keeps most of its elements; a navigation replaces them. Set overlap separates the
+     * two without asking anyone, which is what keeps this from doubling the cost of every step.
+     */
+    private fun navigated(before: List<PilotElement>, after: List<PilotElement>): Boolean {
+        fun PilotElement.identity(): String? = (resId ?: text ?: desc)?.takeIf { it.isNotBlank() }
+        val was = before.mapNotNull { it.identity() }.toSet()
+        if (was.isEmpty()) return true  // nothing identifiable to compare — treat as a move
+        val now = after.mapNotNull { it.identity() }.toSet()
+        return was.count { it in now } * 2 < was.size   // under half survived ⇒ somewhere else
+    }
+
+    /**
+     * Ask for a second opinion on where we landed, defaulting to "fine".
+     *
+     * Every failure mode here — no reflector, a network blip, an answer that doesn't parse —
+     * resolves to [Reflection.MATCHED]. An advisory call must never be able to end or derail a
+     * run that is otherwise going well, and a wrongly-undone correct step costs more than a
+     * missed wrong one.
+     */
+    private suspend fun reflect(
+        task: String, note: String, before: List<PilotElement>, after: List<PilotElement>,
+    ): Reflection = runCatching { reflector?.reflect(task, note, before, after) }
+        .getOrNull() ?: Reflection.MATCHED
 
     /** Perform one non-terminal action; returns (success, human note for history/UI). */
     private suspend fun execute(
@@ -407,5 +466,13 @@ class PilotController(
          */
         const val MAX_TRACE_STEPS = 40
         const val HISTORY_WINDOW = 30       // reasoner sees the last N action notes verbatim
+        /**
+         * Wrong-page undos allowed per run.
+         *
+         * Reflection is a judgement call, and a judgement call that fires every step could
+         * ping-pong forward and back forever. After this many the run carries on regardless and
+         * leans on the stuck guard, which is slower but cannot loop.
+         */
+        const val MAX_ROLLBACKS = 3
     }
 }

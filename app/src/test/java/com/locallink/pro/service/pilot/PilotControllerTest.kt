@@ -12,13 +12,18 @@ class PilotControllerTest {
         PilotElement(0, "Send", null, null, "Button", intArrayOf(0, 0, 10, 10), true, false),
     )
 
+    private fun el(id: Int, text: String) =
+        PilotElement(id, text, null, null, "Button", intArrayOf(0, 0, 10, 10), true, false)
+
     /** Configurable fake actuator; records taps, screens supplied by [perceiveFn]. */
     private class FakeActuator(
         val perceiveFn: () -> List<PilotElement>,
         val isCancelled: () -> Boolean = { false },
         val onTap: (PilotElement) -> Boolean = { true },
+        val onBack: () -> Unit = {},
     ) : PilotActuator {
         val tapped = ArrayList<Int>()
+        var backs = 0
         override fun perceive() = perceiveFn()
         override suspend fun tap(e: PilotElement): Boolean { tapped.add(e.id); return onTap(e) }
         override suspend fun longPress(e: PilotElement) = true
@@ -29,7 +34,7 @@ class PilotControllerTest {
         override suspend fun pressEnter(e: PilotElement) = true
         override suspend fun swipe(direction: String) = true
         override fun launchApp(app: String) = true
-        override fun back() = true
+        override fun back(): Boolean { backs++; onBack(); return true }
         override fun home() = true
         override fun recents() = true
         override fun notifications() = true
@@ -134,6 +139,124 @@ class PilotControllerTest {
         val last = events.last()
         assertTrue(last is AgentEvent.Final)
         assertEquals("recovered", (last as AgentEvent.Final).text)
+    }
+
+    // ─── Reflection: A/B/C verdict after a navigation ───────────────────────────────────────
+
+    @Test fun aWrongPageIsUndoneOnTheStepItHappens() = runTest {
+        // Landing on an ad used to cost three identical taps before the stuck guard noticed.
+        // A reflector catches it on the step it happens, and the model is told to re-route.
+        var onAd = false
+        var reflections = 0
+        val seenHistory = ArrayList<List<String>>()
+
+        val actuator = FakeActuator(
+            perceiveFn = { if (onAd) listOf(el(0, "Congratulations, you won")) else listOf(el(0, "Open")) },
+            onTap = { onAd = true; true },
+            onBack = { onAd = false },
+        )
+        val ctrl = PilotController(
+            reasoner = PilotReasoner { _, _, _, history ->
+                seenHistory.add(history)
+                if (actuator.backs > 0) "done" to """{"result":"recovered"}""" else "tap" to """{"id":0}"""
+            },
+            actuator = actuator,
+            reflector = { _, _, _, _ -> reflections++; Reflection.WRONG_PAGE },
+            maxSteps = 10,
+        )
+        val events = ctrl.run("open my orders").toList()
+
+        assertEquals("one tap, undone once — not three taps then the stuck guard", 1, actuator.tapped.size)
+        assertEquals(1, actuator.backs)
+        assertEquals(1, reflections)
+        assertEquals("recovered", (events.last() as AgentEvent.Final).text)
+        // Phase 2: the history the model reads carries the verdict, not just what happened.
+        val note = seenHistory.last().last()
+        assertTrue("history should say it went back and why, got: $note", note.contains("went BACK"))
+    }
+
+    @Test fun aNoOpScreenIsDecidedWithoutAskingTheReflector() = runTest {
+        // "Nothing happened" is free — identical screen signatures. Paying a model call to
+        // re-derive it would be the whole cost of reflection for none of the benefit.
+        var reflections = 0
+        val script = ArrayDeque(listOf("tap" to """{"id":0}""", "done" to """{"result":"ok"}"""))
+        val actuator = FakeActuator(perceiveFn = { oneElement })
+        val ctrl = PilotController(
+            reasoner = { _, _, _, _ -> script.removeFirst() },
+            actuator = actuator,
+            reflector = { _, _, _, _ -> reflections++; Reflection.WRONG_PAGE },
+        )
+        ctrl.run("tap it").toList()
+
+        assertEquals("an inert screen must not cost a reflection", 0, reflections)
+        assertEquals(0, actuator.backs)
+    }
+
+    @Test fun anIncrementalScreenChangeDoesNotCostAReflection() = runTest {
+        // A list that scrolled, or a field that gained text, keeps most of its elements. Only a
+        // real navigation can land on the wrong page, so only that is worth asking about.
+        var scrolled = false
+        var reflections = 0
+        val script = ArrayDeque(listOf("tap" to """{"id":0}""", "done" to """{"result":"ok"}"""))
+        val actuator = FakeActuator(
+            perceiveFn = {
+                listOf(el(0, "Alpha"), el(1, "Beta"), el(2, "Gamma"),
+                    el(3, if (scrolled) "Delta" else "Epsilon"))
+            },
+            onTap = { scrolled = true; true },
+        )
+        val ctrl = PilotController(
+            reasoner = { _, _, _, _ -> script.removeFirst() },
+            actuator = actuator,
+            reflector = { _, _, _, _ -> reflections++; Reflection.WRONG_PAGE },
+        )
+        ctrl.run("scroll the list").toList()
+
+        assertEquals("3 of 4 elements survived — same page, no reflection", 0, reflections)
+        assertEquals(0, actuator.backs)
+    }
+
+    @Test fun aFailingReflectorLeavesTheRunAlone() = runTest {
+        // Reflection is advisory. A network blip on it must not cost a task that is going fine.
+        var onNext = false
+        val actuator = FakeActuator(
+            perceiveFn = { if (onNext) listOf(el(0, "Results")) else listOf(el(0, "Search")) },
+            onTap = { onNext = true; true },
+        )
+        val script = ArrayDeque(listOf("tap" to """{"id":0}""", "done" to """{"result":"found it"}"""))
+        val ctrl = PilotController(
+            reasoner = { _, _, _, _ -> script.removeFirst() },
+            actuator = actuator,
+            reflector = { _, _, _, _ -> error("reflector is down") },
+        )
+        val events = ctrl.run("search").toList()
+
+        assertEquals("found it", (events.last() as AgentEvent.Final).text)
+        assertEquals("a broken reflector must not trigger a rollback", 0, actuator.backs)
+    }
+
+    @Test fun anUndoneActionIsNotTaughtAsARoutineStep() = runTest {
+        // Saving the wrong turn would teach the detour as the route — the next replay would walk
+        // straight back into the ad it just learned to avoid.
+        var onAd = false
+        var savedTrace: List<TraceStep>? = null
+        val actuator = FakeActuator(
+            perceiveFn = { if (onAd) listOf(el(0, "You won a prize")) else listOf(el(0, "Open")) },
+            onTap = { onAd = true; true },
+            onBack = { onAd = false },
+        )
+        val ctrl = PilotController(
+            reasoner = PilotReasoner { _, _, _, _ ->
+                if (actuator.backs > 0) "done" to """{"result":"stopped"}""" else "tap" to """{"id":0}"""
+            },
+            actuator = actuator,
+            reflector = { _, _, _, _ -> Reflection.WRONG_PAGE },
+            onTrace = { steps -> savedTrace = steps },
+        )
+        ctrl.run("open my orders").toList()
+
+        assertEquals(1, actuator.backs)
+        assertEquals("the undone tap must not become a routine step", null, savedTrace)
     }
 
     @Test fun launchAppIsDispatched() = runTest {
