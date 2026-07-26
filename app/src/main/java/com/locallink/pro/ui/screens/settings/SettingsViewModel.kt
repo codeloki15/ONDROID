@@ -10,6 +10,8 @@ import com.locallink.pro.service.llm.OpenRouterClient
 import com.locallink.pro.service.llm.OpenRouterModel
 import com.locallink.pro.service.voice.SttModelManager
 import com.locallink.pro.service.voice.SttModelState
+import com.locallink.pro.service.voice.TtsModelManager
+import com.locallink.pro.service.voice.TtsModelState
 import com.locallink.pro.service.voice.VoiceService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -41,6 +43,7 @@ data class SettingsUiState(
     // On-device STT (parakeet)
     val sttOnDevice: Boolean = true,
     val sttModelState: SttModelState = SttModelState.Missing,
+    val ttsModelState: TtsModelState = TtsModelState.Missing,
     // Learned routines (experience memory)
     val experienceCount: Int = 0,
     // Composio (cloud SaaS tools, beta)
@@ -56,6 +59,7 @@ class SettingsViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val openRouter: OpenRouterClient,
     private val sttModels: SttModelManager,
+    private val ttsModels: TtsModelManager,
     private val experiences: ExperienceStore,
 ) : ViewModel() {
 
@@ -138,8 +142,12 @@ class SettingsViewModel @Inject constructor(
 
         // On-device STT model + preference
         sttModels.refresh()
+        ttsModels.refresh()
         viewModelScope.launch {
             sttModels.state.collect { s -> _uiState.update { it.copy(sttModelState = s) } }
+        }
+        viewModelScope.launch {
+            ttsModels.state.collect { s -> _uiState.update { it.copy(ttsModelState = s) } }
         }
         viewModelScope.launch {
             settingsPreferences.sttOnDevice.collect { on -> _uiState.update { it.copy(sttOnDevice = on) } }
@@ -158,6 +166,9 @@ class SettingsViewModel @Inject constructor(
         settingsPreferences.setSttOnDevice(enabled)
         voiceService.refreshSttEngine()
     }
+
+    fun downloadTtsModel() = ttsModels.startDownload()
+    fun cancelTtsDownload() = ttsModels.cancel()
 
     fun downloadSttModel() = sttModels.startDownload()
     fun cancelSttDownload() = sttModels.cancelDownload()

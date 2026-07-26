@@ -29,7 +29,7 @@ class KokoroTtsService @Inject constructor(
 ) {
     companion object {
         private const val TAG = "KokoroTtsService"
-        private const val MODEL_DIR = "kokoro-en-v0_19"
+        const val MODEL_DIR = "kokoro-en-v0_19"
         /**
          * How long the playback worker keeps the AudioTrack open waiting for the next
          * queued sentence. Long enough to bridge the gap while the LLM streams the next
@@ -68,6 +68,13 @@ class KokoroTtsService @Inject constructor(
         scope.launch {
             try {
                 copyAssetsIfNeeded()
+                // The acoustic model is downloaded on demand; until it is, stay un-ready and let
+                // VoiceService fall back to Android TTS rather than crashing on a missing file.
+                val model = File(context.getExternalFilesDir(null), "$MODEL_DIR/model.onnx")
+                if (!model.exists()) {
+                    Log.i(TAG, "Kokoro model not downloaded yet — using system TTS until it is")
+                    return@launch
+                }
                 initTts()
                 warmUp()
                 _isReady.value = true
@@ -79,10 +86,14 @@ class KokoroTtsService @Inject constructor(
     }
 
     private fun initTts() {
-        val dataDir = File(context.getExternalFilesDir(null), "$MODEL_DIR/espeak-ng-data").absolutePath
+        // Everything is addressed on the filesystem now, not through the AssetManager: the 330 MB
+        // acoustic model is downloaded rather than bundled, so it has no asset path to load from.
+        // Passing no assetManager makes sherpa treat these as ordinary file paths.
+        val base = File(context.getExternalFilesDir(null), MODEL_DIR).absolutePath
+        val dataDir = "$base/espeak-ng-data"
 
         val config = getOfflineTtsConfig(
-            modelDir = MODEL_DIR,
+            modelDir = base,
             modelName = "model.onnx",
             acousticModelName = "",
             vocoder = "",
@@ -102,7 +113,7 @@ class KokoroTtsService @Inject constructor(
         val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
         config.model.numThreads = threads
 
-        tts = OfflineTts(assetManager = context.assets, config = config)
+        tts = OfflineTts(config = config)
         Log.d(TAG, "TTS created with ${tts?.numSpeakers()} speakers, sample rate: " +
             "${tts?.sampleRate()}, threads=$threads")
     }

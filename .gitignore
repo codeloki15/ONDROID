@@ -41,3 +41,6 @@ server/
 scripts/
 ANDROID_SECURITY.md
 APK_file/
+
+# Kokoro acoustic model — downloaded in-app (TtsModelManager), never bundled
+app/src/main/assets/kokoro-en-v0_19/model.onnx

@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.locallink.pro.service.voice.SttModelState
+import com.locallink.pro.service.voice.TtsModelState
 import com.locallink.pro.service.voice.VoicePreviewPhrases
 import com.locallink.pro.ui.components.GhostPill
 import com.locallink.pro.ui.components.GradientPill
@@ -140,6 +141,11 @@ fun SettingsScreen(
                             onReady = viewModel::onSttModelReady,
                         )
                     }
+                    TtsModelBlock(
+                        state = uiState.ttsModelState,
+                        onDownload = viewModel::downloadTtsModel,
+                        onCancel = viewModel::cancelTtsDownload,
+                    )
                     SettingsToggle(
                         title = "Speak replies",
                         subtitle = "Read AI responses aloud",
@@ -704,6 +710,80 @@ private fun OmniTextField(
         ),
         modifier = Modifier.fillMaxWidth()
     )
+}
+
+/**
+ * Download / status block for Kokoro's natural voice (~330 MB).
+ *
+ * Offered rather than required: without it the app speaks with Android's built-in voice, so this
+ * is an upgrade the user opts into, not a gate. Keeping it out of the APK is what took the
+ * install from 568 MB to 146 MB.
+ */
+@Composable
+private fun TtsModelBlock(
+    state: TtsModelState,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(OmniSurface)
+            .border(1.dp, OmniBorder, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+    ) {
+        when (state) {
+            is TtsModelState.Missing -> {
+                Text("Natural voice", style = MaterialTheme.typography.titleSmall, color = OmniText)
+                Text(
+                    "Omni speaks with your phone's built-in voice. Download the natural voice " +
+                        "(330 MB) for a much better one — offline, and only once.",
+                    style = MaterialTheme.typography.bodySmall, color = OmniTextDim,
+                )
+                Spacer(Modifier.height(10.dp))
+                GradientPill("Download voice", onClick = onDownload)
+            }
+            is TtsModelState.Downloading -> {
+                val pct = if (state.total > 0) (state.done * 100 / state.total).toInt() else 0
+                Text(
+                    "Downloading natural voice — $pct%",
+                    style = MaterialTheme.typography.titleSmall, color = OmniText,
+                )
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { if (state.total > 0) state.done.toFloat() / state.total else 0f },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = AuroraVioletHi,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "You can keep using Omni — it'll switch over when this finishes.",
+                    style = MaterialTheme.typography.bodySmall, color = OmniTextFaint,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Cancel",
+                    style = MaterialTheme.typography.labelLarge, color = OmniTextDim,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onCancel)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+            is TtsModelState.Ready ->
+                Text(
+                    "Natural voice ready — restart the app to use it",
+                    style = MaterialTheme.typography.bodyMedium, color = OmniText,
+                )
+            is TtsModelState.Error -> {
+                Text(state.message, style = MaterialTheme.typography.bodySmall, color = OmniError)
+                Spacer(Modifier.height(8.dp))
+                GradientPill("Try again", onClick = onDownload)
+            }
+        }
+    }
 }
 
 /** Download / status block for the on-device parakeet STT model (~670 MB). */
