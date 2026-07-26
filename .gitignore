@@ -44,3 +44,6 @@ APK_file/
 
 # Kokoro acoustic model — downloaded in-app (TtsModelManager), never bundled
 app/src/main/assets/kokoro-en-v0_19/model.onnx
+
+# Reference GUI-agent repos studied for technique, never built or shipped
+externals/

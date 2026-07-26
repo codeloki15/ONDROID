@@ -124,8 +124,14 @@ object PilotActionSchema {
                 listOf("direction")),
         )
         val scroll = fn(
-            "scroll", "Scroll the current list/screen up or down to reveal more elements.",
-            obj(JSONObject().put("direction", enumStr("scroll direction", listOf("up", "down"))),
+            "scroll",
+            "Scroll the list to reveal more elements. Direction is where the CONTENT moves you: " +
+                "\"down\" reveals what is below (further down the list), \"up\" goes back toward " +
+                "the top. If one direction doesn't reveal what you expected, try the other. " +
+                "Prefer find(text) when you know what you're looking for.",
+            obj(JSONObject().put("direction",
+                enumStr("\"down\" to see further down the list, \"up\" to go back up",
+                    listOf("up", "down"))),
                 listOf("direction")),
         )
         val launchApp = fn(
