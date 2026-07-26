@@ -35,6 +35,7 @@ class ChatRepository @Inject constructor(
     private val memory: MemoryStore,
     private val deviceTools: com.locallink.pro.service.llm.tools.DeviceToolFastPath,
     private val teaching: com.locallink.pro.service.pilot.GuidedTeachingSession,
+    private val notifier: com.locallink.pro.service.pilot.AutomationNotifier,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) {
     private companion object { const val TAG = "ChatRepository" }
@@ -44,6 +45,8 @@ class ChatRepository @Inject constructor(
     // under each other and both spiral into replans. New runs queue behind the active one.
     private val agentMutex = Mutex()
     @Volatile private var activeTask: String? = null
+    /** Runs parked behind the active one — surfaced in the shade so a queue isn't invisible. */
+    private val waiting = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
      * Wrap an agent flow so executions are strictly serialized on the shared screen. The STOP
@@ -51,15 +54,33 @@ class ChatRepository @Inject constructor(
      * submit time would clear a STOP aimed at the active run.
      */
     private fun serialized(task: String, inner: Flow<AgentEvent>): Flow<AgentEvent> = flow {
-        agentMutex.withLock {
-            activeTask = task
-            _isAiResponding.value = true
-            val svc = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
-            svc?.showStop()
-            try { emitAll(inner) } finally {
-                svc?.hideStop()
-                activeTask = null
+        waiting.incrementAndGet()
+        var acquired = false
+        try {
+            agentMutex.withLock {
+                acquired = true
+                waiting.decrementAndGet()
+                activeTask = task
+                _isAiResponding.value = true
+                val svc = com.locallink.pro.service.pilot.OmniAccessibilityService.instance
+                svc?.showStop()
+                // Every entry point — chat, voice, the routine library, WorkManager schedules and
+                // notification triggers — funnels through here, so this is the one place that can
+                // say what the phone is doing without each of them growing its own copy.
+                notifier.start(task, waiting.get())
+                try {
+                    emitAll(inner.onEach { notifier.onEvent(it) })
+                } finally {
+                    notifier.stop()
+                    svc?.hideStop()
+                    activeTask = null
+                }
             }
+        } finally {
+            // A queued run can be abandoned before it ever gets the lock (collector cancelled
+            // while waiting). Without this the count only ever climbs and the shade starts
+            // inventing a queue that isn't there.
+            if (!acquired) waiting.decrementAndGet()
         }
     }
 
