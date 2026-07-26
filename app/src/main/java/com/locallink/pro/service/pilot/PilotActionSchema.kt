@@ -23,6 +23,7 @@ object PilotActionSchema {
         quick_settings, scroll(up/down) to reveal off-screen items, swipe, tap, long_press,
         double_tap, drag, type(id,text), clear, press_enter(id), wait(ms) to let the screen settle.
         To RUN a search: type(id,text) then press_enter(id) — typing only fills the box.
+        To reach something off-screen: find(text) scrolls to it — don't guess repeated swipes.
         If press_enter reports it isn't available, tap the app's own search/submit control.
 
         Loop discipline: emit exactly ONE action per step. After each action the screen changes —
@@ -108,6 +109,14 @@ object PilotActionSchema {
                 "— typing alone only fills the box, it does not submit.",
             obj(JSONObject().put("id", int("id of the text field to submit")), listOf("id")),
         )
+        val find = fn(
+            "find",
+            "Scroll until something whose text or description contains the given text is on " +
+                "screen, then stop. Use this instead of guessing repeated scrolls when what you " +
+                "need isn't in the element list — including when the list says elements were omitted.",
+            obj(JSONObject().put("text", str("text to scroll to, e.g. a product name or a setting")),
+                listOf("text")),
+        )
         val swipe = fn(
             "swipe", "Swipe the screen in a direction (to reveal content or change pages).",
             obj(JSONObject().put("direction",
@@ -142,7 +151,7 @@ object PilotActionSchema {
             obj(JSONObject().put("question", str("question for the user")), listOf("question")),
         )
         return JSONArray()
-            .put(tap).put(longPress).put(doubleTap).put(drag).put(type).put(clear).put(pressEnter)
+            .put(tap).put(longPress).put(doubleTap).put(drag).put(type).put(clear).put(pressEnter).put(find)
             .put(swipe).put(scroll).put(launchApp)
             .put(back).put(home).put(recents).put(notifications).put(quickSettings)
             .put(wait).put(done).put(ask)

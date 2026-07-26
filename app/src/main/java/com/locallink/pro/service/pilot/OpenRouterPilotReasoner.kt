@@ -15,6 +15,16 @@ class OpenRouterPilotReasoner(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build(),
 ) : PilotReasoner {
+    companion object {
+        /**
+         * How many on-screen elements go into one prompt.
+         *
+         * Enough to cover a normal screen with room to spare; the tail of a very dense one is
+         * reachable through find(text) instead of being pasted into every step.
+         */
+        private const val MAX_ELEMENTS = 80
+    }
+
     private val json = "application/json; charset=utf-8".toMediaType()
 
     override suspend fun nextAction(
@@ -22,12 +32,24 @@ class OpenRouterPilotReasoner(
     ): Pair<String, String> {
         val key = settings.loadOpenRouterApiKey()
         val model = settings.loadOpenRouterModel()
-        val elementsJson = JSONArray().apply { elements.forEach { put(it.toJson()) } }
+        // Cap what goes into the prompt. The whole interactive tree was being sent on every
+        // step, up to 60 steps — a dense screen costs real tokens and buries the few elements
+        // that matter. Interactive things come first because those are what an action targets;
+        // the count of what was dropped tells the model to scroll rather than assume it has
+        // seen everything.
+        val shown = elements.sortedByDescending { (it.clickable || it.editable) }.take(MAX_ELEMENTS)
+        val omitted = elements.size - shown.size
+        val elementsJson = JSONArray().apply { shown.forEach { put(it.toJson()) } }
         val userContent = JSONArray().apply {
             put(JSONObject().put("type", "text").put(
                 "text",
                 "Task: $task\n\nHistory:\n${history.joinToString("\n").ifBlank { "(none)" }}\n\n" +
-                    "On-screen elements:\n$elementsJson\n\nChoose ONE action.",
+                    "On-screen elements:\n$elementsJson\n" +
+                        (if (omitted > 0)
+                            "($omitted more elements are on this screen but not listed — " +
+                                "scroll or use find(text) if what you need isn't here.)\n"
+                        else "") +
+                        "\nChoose ONE action.",
             ))
             if (screenshot != null) {
                 val b64 = Base64.encodeToString(screenshot, Base64.NO_WRAP)

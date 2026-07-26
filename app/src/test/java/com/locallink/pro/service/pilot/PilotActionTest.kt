@@ -20,6 +20,19 @@ class PilotActionTest {
         assertTrue(PilotActionParser.parse("press_enter", """{}""") is PilotAction.Invalid)
     }
 
+    @Test fun parsesFind() {
+        assertEquals(
+            PilotAction.FindText("Lavazza Gusto Crema"),
+            PilotActionParser.parse("find", """{"text":"Lavazza Gusto Crema"}"""),
+        )
+    }
+
+    @Test fun findWithoutTextIsRejected() {
+        // A blank find would scroll to the end of the list and report success on nothing.
+        assertTrue(PilotActionParser.parse("find", """{"text":""}""") is PilotAction.Invalid)
+        assertTrue(PilotActionParser.parse("find", """{}""") is PilotAction.Invalid)
+    }
+
     @Test fun parsesDoneAndAsk() {
         assertEquals(PilotAction.Done("found it"),
             PilotActionParser.parse("done", """{"result":"found it"}"""))

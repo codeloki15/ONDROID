@@ -82,8 +82,25 @@ class PilotController(
             // Terminal actions first.
             when (action) {
                 is PilotAction.Done -> {
-                    if (!traceBroken && trace.isNotEmpty() && trace.size <= MAX_TRACE_STEPS) {
+                    // Say why a routine wasn't kept. Silently dropping it is the worst outcome:
+                    // the task visibly succeeded, no routine appears, and there is nothing to
+                    // debug — which is exactly what a long taught routine used to do.
+                    val skip = when {
+                        trace.isEmpty() -> null   // nothing was performed; no routine to expect
+                        traceBroken ->
+                            "Not saved as a routine: one of the steps targeted something with no " +
+                                "stable identifier, so replaying it would land somewhere else."
+                        trace.size > MAX_TRACE_STEPS ->
+                            "Not saved as a routine: ${trace.size} steps is past the $MAX_TRACE_STEPS-step " +
+                                "limit for reliable replay. Teaching it as smaller routines will stick."
+                        else -> null
+                    }
+                    if (skip == null && trace.isNotEmpty()) {
                         onTrace?.invoke(trace.toList())
+                    } else if (skip != null) {
+                        emit(AgentEvent.ToolResult(
+                            UUID.randomUUID().toString(), "save_routine", skip, false,
+                        ))
                     }
                     emit(AgentEvent.Final(action.result)); return@flow
                 }
@@ -130,8 +147,13 @@ class PilotController(
             val (ok, note) = execute(action, elements)
             emit(AgentEvent.ToolResult(id, name, if (ok) note else "failed: $note", ok))
             if (ok) {
-                val ts = traceStepOf(action, elements)
-                if (ts != null) trace.add(ts) else traceBroken = true
+                // find() is a search, not a step: skip it without marking the trace broken.
+                // Returning null here would have meant a single find() silently prevented the
+                // whole routine from ever being saved.
+                if (action !is PilotAction.FindText) {
+                    val ts = traceStepOf(action, elements)
+                    if (ts != null) trace.add(ts) else traceBroken = true
+                }
             }
             // Let the screen settle after actions that navigate/transition, so the NEXT perceive
             // (and screenshot) reflect the new screen — this is what stops the model re-issuing the
@@ -201,6 +223,38 @@ class PilotController(
         }
     }
 
+    /**
+     * Scroll until something matching [query] is visible, then stop.
+     *
+     * Scrolls one screen at a time and re-perceives between each, so it stops the moment the
+     * target appears rather than overshooting. Gives up when the screen stops changing — that
+     * means the end of the list, and continuing would just burn steps.
+     */
+    private suspend fun findOnScreen(query: String): Pair<Boolean, String> {
+        fun matches(e: PilotElement) =
+            (e.text?.contains(query, ignoreCase = true) == true) ||
+                (e.desc?.contains(query, ignoreCase = true) == true)
+
+        if (actuator.perceive().any(::matches)) return true to "\"$query\" is already on screen"
+
+        var lastSig = ""
+        repeat(FIND_MAX_SCROLLS) { i ->
+            if (actuator.cancelled()) return false to "stopped"
+            val before = actuator.perceive()
+            val sig = before.joinToString("|") { "${it.text}${it.bounds[1]}" }
+            if (sig == lastSig) {
+                return false to "\"$query\" not found — reached the end of the list after $i scrolls"
+            }
+            lastSig = sig
+            actuator.swipe("up")
+            settle(SETTLE_MS)
+            if (actuator.perceive().any(::matches)) {
+                return true to "found \"$query\" after ${i + 1} scroll(s)"
+            }
+        }
+        return false to "\"$query\" not found after $FIND_MAX_SCROLLS scrolls"
+    }
+
     /** Perform one non-terminal action; returns (success, human note for history/UI). */
     private suspend fun execute(
         action: PilotAction, elements: List<PilotElement>,
@@ -230,6 +284,7 @@ class PilotController(
                 ok to if (ok) "pressed enter on id ${action.id}"
                       else "enter not available here — look for a search/submit control instead"
             } ?: (false to "press_enter: no element id ${action.id}")
+            is PilotAction.FindText -> findOnScreen(action.text)
             is PilotAction.Swipe -> actuator.swipe(action.direction) to "swiped ${action.direction}"
             // scroll(dir) reveals content in that direction → finger swipes the OPPOSITE way.
             is PilotAction.Scroll -> actuator.swipe(ScrollMap.toSwipe(action.direction)) to "scrolled ${action.direction}"
@@ -270,6 +325,9 @@ class PilotController(
             is PilotAction.Type -> target(action.id, "type", action.text)
             is PilotAction.Clear -> target(action.id, "clear")
             is PilotAction.PressEnter -> target(action.id, "press_enter")
+            // Deliberately untraced: where a scroll lands depends on the list's contents that
+            // day, so replaying "scrolled 3 times" is meaningless. Replay re-locates by target.
+            is PilotAction.FindText -> null
             is PilotAction.Swipe -> TraceStep("swipe", action.direction)
             is PilotAction.Scroll -> TraceStep("scroll", action.direction)
             is PilotAction.LaunchApp -> TraceStep("launch_app", action.query)
@@ -300,7 +358,18 @@ class PilotController(
         private const val SETTLE_FLOOR_MS = 120L // let the action's own events land first
         private const val QUIET_MS = 180L        // no UI change for this long ⇒ screen has settled
         private const val POLL_MS = 40L
-        const val MAX_TRACE_STEPS = 15      // longer flows are too fragile to replay verbatim
+        /** Scroll attempts before find() gives up — a long list, not an infinite one. */
+        private const val FIND_MAX_SCROLLS = 12
+        /**
+         * Longest routine worth storing.
+         *
+         * Was 15, on the reasoning that longer flows are too fragile to replay verbatim. That
+         * predates partial replay: ExperienceReplayer now replays the prefix that still matches
+         * and hands the remainder to reasoning, so a long routine that diverges late still saves
+         * most of the work instead of being useless. A real multi-app task (open, search, filter,
+         * open a result, read it) runs past 15 easily and was silently never kept.
+         */
+        const val MAX_TRACE_STEPS = 40
         const val HISTORY_WINDOW = 30       // reasoner sees the last N action notes verbatim
     }
 }

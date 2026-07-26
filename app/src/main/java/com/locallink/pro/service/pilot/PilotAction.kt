@@ -17,6 +17,15 @@ sealed interface PilotAction {
      * expect the IME action instead, so without this a search could be typed and never run.
      */
     data class PressEnter(val id: Int) : PilotAction
+    /**
+     * Scroll until an element whose text/description contains [text] is on screen.
+     *
+     * Without this, anything below the fold simply isn't in the element list, and the model has
+     * to guess a scroll, re-perceive, and guess again — the usual way a run burns its step budget
+     * without getting anywhere.
+     */
+    data class FindText(val text: String) : PilotAction
+
     data class Swipe(val direction: String) : PilotAction   // up | down | left | right
     data class Scroll(val direction: String) : PilotAction  // up | down
     data class LaunchApp(val query: String) : PilotAction    // app name or package
@@ -48,7 +57,7 @@ object ScrollMap {
 object PilotActionParser {
     /** Every action the model may emit. Kept in sync with [PilotActionSchema.toolsJson]. */
     val ALLOWED = setOf(
-        "tap", "long_press", "double_tap", "drag", "type", "clear", "press_enter",
+        "tap", "long_press", "double_tap", "drag", "type", "clear", "press_enter", "find",
         "swipe", "scroll", "launch_app",
         "back", "home", "recents", "notifications", "quick_settings",
         "wait", "done", "ask",
@@ -75,6 +84,9 @@ object PilotActionParser {
             "double_tap" -> needId(args, "double_tap", PilotAction::DoubleTap)
             "clear" -> needId(args, "clear", PilotAction::Clear)
             "press_enter" -> needId(args, "press_enter", PilotAction::PressEnter)
+            "find" -> args.optString("text").takeIf { it.isNotBlank() }
+                ?.let { PilotAction.FindText(it) }
+                ?: PilotAction.Invalid("find needs a non-empty 'text'")
             "drag" -> if (args.has("from_id") && args.has("to_id"))
                 PilotAction.Drag(args.getInt("from_id"), args.getInt("to_id"))
             else PilotAction.Invalid("drag requires 'from_id' and 'to_id'")
