@@ -36,6 +36,7 @@ class ChatRepository @Inject constructor(
     private val deviceTools: com.locallink.pro.service.llm.tools.DeviceToolFastPath,
     private val teaching: com.locallink.pro.service.pilot.GuidedTeachingSession,
     private val notifier: com.locallink.pro.service.pilot.AutomationNotifier,
+    private val filmstrip: com.locallink.pro.service.pilot.RunFilmstrip,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) {
     private companion object { const val TAG = "ChatRepository" }
@@ -68,6 +69,7 @@ class ChatRepository @Inject constructor(
                 // notification triggers — funnels through here, so this is the one place that can
                 // say what the phone is doing without each of them growing its own copy.
                 notifier.start(task, waiting.get())
+                filmstrip.begin()
                 try {
                     emitAll(inner.onEach { notifier.onEvent(it) })
                 } finally {
@@ -682,6 +684,11 @@ class ChatRepository @Inject constructor(
 
     /** Persist one Pilot [AgentEvent] to the chat DB (runs in the service scope). */
     private suspend fun persistPilotEvent(sessionId: String, event: AgentEvent) {
+        // The filmstrip listens HERE, not in serialized(). PlanExecutor consumes the pilot's
+        // ToolCall/ToolResult inside ChannelRunner.pilot() and never re-emits them, so a planned
+        // run's actions never reach the outer flow — the strip recorded nothing for a whole run
+        // and there was no sign of why. This is the one place every pilot path routes through.
+        filmstrip.onEvent(event)
         when (event) {
             is AgentEvent.Token -> _streamingText.value += event.text
             is AgentEvent.ToolCall -> messageDao.insert(MessageEntity(

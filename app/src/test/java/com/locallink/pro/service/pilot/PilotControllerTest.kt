@@ -193,7 +193,15 @@ class PilotControllerTest {
         val ctrl = PilotController(
             reasoner = PilotReasoner { _, _, _, _ ->
                 if (++calls == 1) "tap" to """{"id":0}"""
-                else { release.complete(Unit); "done" to """{"result":"overlapped"}""" }
+                else {
+                    // Both halves of the property, enforced by construction rather than observed
+                    // after the fact: this waits for the verdict to be IN FLIGHT (so it cannot
+                    // pass if reflection never started) and only then unblocks it (so it cannot
+                    // pass if reflection was awaited before this call).
+                    reflecting.await()
+                    release.complete(Unit)
+                    "done" to """{"result":"overlapped"}"""
+                }
             },
             actuator = actuator,
             reflector = { _, _, _, _ ->
@@ -202,7 +210,6 @@ class PilotControllerTest {
         )
         val events = ctrl.run("search").toList()
 
-        assertTrue("the verdict should have been started", reflecting.isCompleted)
         assertEquals("overlapped", (events.last() as AgentEvent.Final).text)
     }
 

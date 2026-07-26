@@ -1,11 +1,17 @@
 #!/bin/bash
-# openWakeWord custom model training for "hey omni" — Phase B of the wake-word fix.
-# Runs fully on this Mac; produces hey_omni.onnx for on-device inference.
-# Stages are idempotent — re-running resumes where it left off.
+# openWakeWord custom model training for "hey omni" — a dedicated wake-word model to
+# replace the generic sherpa-onnx KeywordSpotter (which is tuned for no voice in
+# particular). Runs fully on this Mac; produces trained/hey_omni.onnx for on-device
+# inference. Stages are idempotent — re-running resumes where it left off.
 set -e
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
 log() { echo "[$(date +%H:%M:%S)] $*"; }
+
+# How many synthetic positives to train on. openWakeWord's own guidance is a 20,000
+# minimum; TTS generation runs ~35 clips/sec on MPS, so this costs minutes, not hours.
+N_SAMPLES=${N_SAMPLES:-20000}
+N_SAMPLES_VAL=${N_SAMPLES_VAL:-4000}
 
 # ── Stage 1: python env ─────────────────────────────────────────────────
 if [ ! -d venv ]; then
@@ -22,20 +28,23 @@ python -c "import openwakeword" 2>/dev/null || {
       soundfile scipy tqdm requests pyyaml mutagen torchinfo torchmetrics speechbrain \
       audiomentations torch-audiomentations acoustics pronouncing "datasets==3.6.0" deep-phonemizer
 }
+# piper-sample-generator's top-level imports need piper-tts even on the .pt path.
+python -c "import piper" 2>/dev/null || { log "installing piper-tts"; pip -q install piper-tts; }
 
-# ── Stage 2: piper sample generator (synthetic positives) ───────────────
+# ── Stage 2: piper sample generator (synthetic speech) ──────────────────
 if [ ! -d piper-sample-generator ]; then
   log "cloning piper-sample-generator"
   git clone --depth 1 https://github.com/rhasspy/piper-sample-generator
 fi
-if [ ! -f piper-sample-generator/models/en_US-libritts_r-medium.pt ]; then
-  log "downloading piper libritts_r voice (~500MB)"
+PIPER_VOICE="$ROOT/piper-sample-generator/models/en_US-libritts_r-medium.pt"
+if [ ! -f "$PIPER_VOICE" ]; then
+  log "downloading piper libritts_r voice (~200MB)"
   mkdir -p piper-sample-generator/models
-  curl -sL -o piper-sample-generator/models/en_US-libritts_r-medium.pt \
+  curl -sL -o "$PIPER_VOICE" \
     "https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt"
 fi
 
-# ── Stage 3: openwakeword training assets (negatives, RIRs, validation) ─
+# ── Stage 3: openwakeword feature banks (negatives + FP validation) ─────
 mkdir -p data
 python - <<'EOF'
 import os, requests
@@ -55,99 +64,55 @@ def fetch(url, dest, desc):
 base = "https://huggingface.co/datasets/davidscripka/openwakeword_features/resolve/main"
 fetch(f"{base}/openwakeword_features_ACAV100M_2000_hrs_16bit.npy",
       "data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy",
-      "negative features (~2GB)")
+      "negative features (~17GB)")
 fetch(f"{base}/validation_set_features.npy",
       "data/validation_set_features.npy",
-      "validation features (~300MB)")
+      "validation features (~185MB)")
 EOF
 
-log "setup complete — training starts next"
-
-# ── Stage 4: generate synthetic positives + adversarial negatives ───────
-# The repo is a package now (no top-level generate_samples.py): run it as a module
-# with PYTHONPATH at the repo root (piper_sample_generator + piper_train live there).
-# Its top-level imports need piper-tts even for the .pt generator path.
-python -c "import piper" 2>/dev/null || { log "installing piper-tts"; pip -q install piper-tts; }
-export PYTHONPATH="$ROOT/piper-sample-generator"
-mkdir -p generated/positive generated/negative
-if [ ! -f generated/positive/.done ]; then
-  log "generating 3000 'hey omni' samples"
-  python -m piper_sample_generator "hey omni" \
-    --model piper-sample-generator/models/en_US-libritts_r-medium.pt \
-    --max-samples 3000 --batch-size 50 --output-dir generated/positive
-  touch generated/positive/.done
-fi
-if [ ! -f generated/negative/.done ]; then
-  log "generating adversarial negatives"
-  python -m piper_sample_generator \
-    "hey ah me, a mony, heyomi, hail money, hey armani, how many" \
-    --model piper-sample-generator/models/en_US-libritts_r-medium.pt \
-    --max-samples 1500 --batch-size 50 --output-dir generated/negative
-  touch generated/negative/.done
-fi
-
-log "sample generation complete"
-
-# ── Stage 5: augmentation assets (RIRs + background noise) ──────────────
+# ── Stage 4: augmentation assets (RIRs + background noise) ──────────────
 # Reverb + noise mixing is what makes a synthetic-TTS-trained model survive a real
-# phone mic across the room. RIRs: MIT environmental impulse responses. Backgrounds:
-# AudioSet clips + FMA music, streamed via HF datasets and saved as 16 kHz wavs.
-# fetch_audio.py streams via Audio(decode=False) + soundfile — datasets>=4 would
-# otherwise require torchcodec (and system FFmpeg) for its own audio decoding.
-if [ ! -f mit_rirs/.done ]; then
+# phone mic across the room. Idempotency is by clip COUNT, not a .done marker: these
+# are network streams that partially fail, and a marker file would freeze a half-empty
+# directory in place (an empty ./mit_rirs is what stalled the previous run).
+have() { ls "$1"/*.wav 2>/dev/null | wc -l | tr -d ' '; }
+
+if [ "$(have mit_rirs)" -lt 200 ]; then
   log "downloading MIT RIRs"
   python fetch_audio.py davidscripka/MIT_environmental_impulse_responses train mit_rirs rir 100000
-  touch mit_rirs/.done
 fi
-
-if [ ! -f audioset_16k/.done ]; then
-  log "streaming AudioSet background clips (1500)"
+if [ "$(have audioset_16k)" -lt 1400 ]; then
+  log "streaming AudioSet background clips"
   python fetch_audio.py agkphysics/AudioSet train audioset_16k as 1500 \
-    || echo "[warn] audioset stream failed — continuing without it"
-  touch audioset_16k/.done
+    || echo "[warn] audioset stream incomplete — continuing with what landed"
+fi
+log "augmentation assets: rirs=$(have mit_rirs) audioset=$(have audioset_16k)"
+if [ "$(have mit_rirs)" -lt 50 ] || [ "$(have audioset_16k)" -lt 200 ]; then
+  echo "[fatal] too few augmentation clips — training would produce a model that only"
+  echo "        works on clean TTS audio. Re-run to retry the downloads." >&2
+  exit 1
 fi
 
-if [ ! -f fma_16k/.done ]; then
-  log "streaming FMA music clips (700)"
-  python fetch_audio.py rudraml/fma train fma_16k fma 700 small \
-    || echo "[warn] fma stream failed — continuing without it"
-  touch fma_16k/.done
-fi
-
-# ── Stage 6: train hey_omni (openwakeword official pipeline) ────────────
-# pip openwakeword's train.py still does `from generate_samples import generate_samples`
-# (pre-package layout) — shim the old flat module at the repo root it sys.path-inserts.
-cat > piper-sample-generator/generate_samples.py <<'PY'
-# Compat shim: upstream became a package; openwakeword's train.py imports the old
-# flat module. Re-export the function it needs.
-from piper_sample_generator.__main__ import generate_samples  # noqa: F401
-PY
-
-# Seed the pipeline's clip layout with our pre-generated samples (seed_ prefix so
-# train.py's top-up generation, which numbers from 0, never collides).
-mkdir -p trained/hey_omni/positive_train trained/hey_omni/negative_train
-if [ ! -f trained/hey_omni/.seeded ]; then
-  log "seeding pre-generated clips into training layout"
-  for f in generated/positive/*.wav; do [ -e "$f" ] && mv "$f" "trained/hey_omni/positive_train/seed_$(basename "$f")"; done
-  for f in generated/negative/*.wav; do [ -e "$f" ] && mv "$f" "trained/hey_omni/negative_train/seed_$(basename "$f")"; done
-  touch trained/hey_omni/.seeded
-fi
-
-log "writing hey_omni.yml"
-python - <<'EOF'
+# ── Stage 5: training config ────────────────────────────────────────────
+log "writing hey_omni.yml (n_samples=$N_SAMPLES)"
+N_SAMPLES=$N_SAMPLES N_SAMPLES_VAL=$N_SAMPLES_VAL python - <<'EOF'
 import os, yaml
 bgs = [f"./{d}" for d in ("audioset_16k", "fma_16k")
        if os.path.isdir(d) and len([f for f in os.listdir(d) if f.endswith(".wav")]) > 5]
-assert bgs, "no background clips downloaded — augmentation would be no-op"
+assert bgs, "no background clips — augmentation would be a no-op"
 cfg = {
     "model_name": "hey_omni",
     "target_phrase": ["hey omni"],
-    "custom_negative_phrases": ["hey ah me", "a mony", "heyomi", "hail money", "hey armani", "how many"],
-    "n_samples": 3000,
-    "n_samples_val": 500,
+    # Confusables observed to trip the current KWS, plus whatever phoneme overlap finds.
+    "custom_negative_phrases": ["hey ah me", "a mony", "heyomi", "hail money",
+                                "hey armani", "how many", "hey mommy", "hey on me"],
+    "n_samples": int(os.environ["N_SAMPLES"]),
+    "n_samples_val": int(os.environ["N_SAMPLES_VAL"]),
     "tts_batch_size": 50,
     "augmentation_batch_size": 16,
-    "augmentation_rounds": 2,
+    # 1 round: >1 exists to squeeze variety out of a small clip set, and at 20k unique
+    # clips it buys little while doubling the (CPU-bound) augmentation time.
+    "augmentation_rounds": 1,
     "piper_sample_generator_path": "./piper-sample-generator",
     "output_dir": "./trained",
     "rir_paths": ["./mit_rirs"],
@@ -166,6 +131,25 @@ yaml.safe_dump(cfg, open("hey_omni.yml", "w"))
 print("config written; backgrounds:", bgs)
 EOF
 
+# ── Stage 6: compat shim for openwakeword's TTS import ──────────────────
+# pip openwakeword's train.py does `from generate_samples import generate_samples`
+# (the pre-package layout) and calls it WITHOUT a `model` argument. Upstream became a
+# package and made `model` required, so a bare re-export raises TypeError on the first
+# call — the shim has to bind the voice path back in, the way the flat module's default
+# used to.
+cat > piper-sample-generator/generate_samples.py <<PY
+# Compat shim: upstream became a package and made \`model\` a required argument;
+# openwakeword's train.py still imports the old flat module and omits it.
+import functools
+from piper_sample_generator.__main__ import generate_samples as _generate_samples
+
+generate_samples = functools.partial(
+    _generate_samples, model="$PIPER_VOICE"
+)
+PY
+
+export PYTHONPATH="$ROOT/piper-sample-generator"
+
 # Base feature models (melspectrogram + speech embedding) used by the trainer.
 python - <<'EOF'
 import openwakeword.utils as u
@@ -173,13 +157,26 @@ try: u.download_models()
 except TypeError: u.download_models([])
 EOF
 
+# ── Stage 7: train ──────────────────────────────────────────────────────
 TRAIN="$(python -c 'import openwakeword,os; print(os.path.join(os.path.dirname(openwakeword.__file__), "train.py"))')"
-export PYTHONPATH="$ROOT/piper-sample-generator"
-log "phase: generate_clips (top-up + val splits)"
+mkdir -p trained
+
+log "phase: generate_clips"
 python "$TRAIN" --training_config hey_omni.yml --generate_clips
-log "phase: augment_clips"
+log "phase: augment_clips (computes openwakeword features)"
 python "$TRAIN" --training_config hey_omni.yml --augment_clips
 log "phase: train_model"
-python "$TRAIN" --training_config hey_omni.yml --train_model
-log "training complete — model at trained/hey_omni.onnx"
-ls -la trained/*.onnx 2>/dev/null || true
+# The last thing train.py does is convert the ONNX to tflite via onnx_tf, which is
+# unmaintained and does not install on modern Python/TF. The ONNX export happens FIRST,
+# so a failure there costs us nothing — but it exits non-zero, which `set -e` would
+# treat as a training failure. Tolerate it, then assert on the artifact we actually want.
+python "$TRAIN" --training_config hey_omni.yml --train_model || \
+  log "[warn] train.py exited non-zero (expected: tflite conversion) — checking ONNX"
+
+if [ ! -f trained/hey_omni.onnx ]; then
+  echo "[fatal] training did not produce trained/hey_omni.onnx" >&2
+  exit 1
+fi
+
+log "training complete"
+ls -la trained/hey_omni.onnx

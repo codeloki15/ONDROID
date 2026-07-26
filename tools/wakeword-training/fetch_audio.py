@@ -24,7 +24,9 @@ def main() -> None:
     maxn = int(sys.argv[5])
     config = sys.argv[6] if len(sys.argv) > 6 else None
 
-    ds = load_dataset(dataset, config, split=split, streaming=True)
+    # trust_remote_code: some datasets (rudraml/fma) ship a loading script; without this
+    # datasets 3.x raises rather than prompting, and the fetch aborts.
+    ds = load_dataset(dataset, config, split=split, streaming=True, trust_remote_code=True)
     ds = ds.cast_column("audio", Audio(decode=False))
     os.makedirs(outdir, exist_ok=True)
 

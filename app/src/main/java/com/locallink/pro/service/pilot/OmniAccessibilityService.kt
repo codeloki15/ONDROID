@@ -53,6 +53,50 @@ class OmniAccessibilityService : AccessibilityService() {
         overlay = PilotOverlay(this, onStop = { cancelFlag.set(true); hideStop() })
     }
 
+    /**
+     * One frame of the current screen, or null if it isn't available.
+     *
+     * Deliberately NOT MediaProjection. That route needs a consent dialog and a foreground service
+     * of type mediaProjection, and on this device it was simply never granted — every pilot step
+     * ran with `shot=0B`. An accessibility service can take its own screenshot from API 30 with no
+     * consent at all, and one is already bound for the whole run.
+     *
+     * Two limits worth knowing: API 26-29 gets nothing, and the platform throttles these to about
+     * one a second, so a caller that asks too often is refused. Both surface as null, because a
+     * missing frame in a recap is not worth failing a run over.
+     */
+    suspend fun captureScreen(): android.graphics.Bitmap? {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return null
+        return runCatching {
+            kotlinx.coroutines.withTimeoutOrNull(SCREENSHOT_TIMEOUT_MS) {
+                kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                    takeScreenshot(
+                        android.view.Display.DEFAULT_DISPLAY,
+                        java.util.concurrent.Executors.newSingleThreadExecutor(),
+                        object : TakeScreenshotCallback {
+                            override fun onSuccess(result: ScreenshotResult) {
+                                val bmp = runCatching {
+                                    android.graphics.Bitmap.wrapHardwareBuffer(
+                                        result.hardwareBuffer, result.colorSpace,
+                                    )?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                                }.getOrNull()
+                                runCatching { result.hardwareBuffer.close() }
+                                if (cont.isActive) cont.resumeWith(Result.success(bmp))
+                            }
+
+                            override fun onFailure(errorCode: Int) {
+                                // 1 internal, 2 no a11y access, 3 asked again too soon,
+                                // 4 bad display, 5 a secure window refused to be photographed.
+                                android.util.Log.d("RunFilmstrip", "takeScreenshot failed: $errorCode")
+                                if (cont.isActive) cont.resumeWith(Result.success(null))
+                            }
+                        },
+                    )
+                }
+            }
+        }.getOrNull()
+    }
+
     override fun onDestroy() {
         instance = null
         inputOverlay?.hide()
@@ -371,5 +415,7 @@ class OmniAccessibilityService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: OmniAccessibilityService? = null
+        /** A frame is a nicety; never let a wedged capture hold up the run behind it. */
+        private const val SCREENSHOT_TIMEOUT_MS = 2000L
     }
 }

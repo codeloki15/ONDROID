@@ -1,0 +1,37 @@
+augmentation_batch_size: 16
+augmentation_rounds: 1
+background_paths:
+- ./audioset_16k
+background_paths_duplication_rate:
+- 1
+batch_n_per_class:
+  ACAV100M_sample: 1024
+  adversarial_negative: 50
+  positive: 50
+custom_negative_phrases:
+- hey ah me
+- a mony
+- heyomi
+- hail money
+- hey armani
+- how many
+- hey mommy
+- hey on me
+false_positive_validation_data_path: ./data/validation_set_features.npy
+feature_data_files:
+  ACAV100M_sample: ./data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy
+layer_size: 32
+max_negative_weight: 1500
+model_name: hey_omni
+model_type: dnn
+n_samples: 20000
+n_samples_val: 4000
+output_dir: ./trained
+piper_sample_generator_path: ./piper-sample-generator
+rir_paths:
+- ./mit_rirs
+steps: 50000
+target_false_positives_per_hour: 0.2
+target_phrase:
+- hey omni
+tts_batch_size: 50
