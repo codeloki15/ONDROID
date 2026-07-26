@@ -175,6 +175,37 @@ class PilotControllerTest {
         assertTrue("history should say it went back and why, got: $note", note.contains("went BACK"))
     }
 
+    @Test fun theNextActionIsPlannedWhileTheVerdictIsStillInFlight() = runTest {
+        // Measured on device: a verdict took ~1.4s sitting in front of a reasoner call that takes
+        // 2.5-4.3s and can hide it completely. The verdict is not needed until the next action is
+        // about to run, so it is started and resolved a step later.
+        //
+        // This test deadlocks if reflection ever goes back on the critical path: the reflector
+        // only unblocks when the SECOND planning call happens, which an inline await prevents.
+        val reflecting = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var onNext = false
+        val actuator = FakeActuator(
+            perceiveFn = { if (onNext) listOf(el(0, "Results")) else listOf(el(0, "Search")) },
+            onTap = { onNext = true; true },
+        )
+        var calls = 0
+        val ctrl = PilotController(
+            reasoner = PilotReasoner { _, _, _, _ ->
+                if (++calls == 1) "tap" to """{"id":0}"""
+                else { release.complete(Unit); "done" to """{"result":"overlapped"}""" }
+            },
+            actuator = actuator,
+            reflector = { _, _, _, _ ->
+                reflecting.complete(Unit); release.await(); Reflection.MATCHED
+            },
+        )
+        val events = ctrl.run("search").toList()
+
+        assertTrue("the verdict should have been started", reflecting.isCompleted)
+        assertEquals("overlapped", (events.last() as AgentEvent.Final).text)
+    }
+
     @Test fun aNoOpScreenIsDecidedWithoutAskingTheReflector() = runTest {
         // "Nothing happened" is free — identical screen signatures. Paying a model call to
         // re-derive it would be the whole cost of reflection for none of the benefit.

@@ -1,7 +1,11 @@
 package com.locallink.pro.service.pilot
 
 import com.locallink.pro.service.llm.AgentEvent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -70,6 +74,25 @@ class PilotController(
         // Mechanical repeat-blocker (pi-style guard hook): same action on the same screen
         // twice is never executed again — the model is told to choose differently.
         val attempted = HashMap<String, Int>()
+
+        /** Turn an executed action into a routine step. Local so it can latch [traceBroken]. */
+        fun commitTrace(action: PilotAction, elements: List<PilotElement>) {
+            // find() is a search, not a step: skip it without marking the trace broken. Returning
+            // null here would have meant a single find() silently prevented the whole routine
+            // from ever being saved.
+            if (action is PilotAction.FindText) return
+            val ts = traceStepOf(action, elements)
+            if (ts != null) trace.add(ts) else traceBroken = true
+        }
+
+        // Reflection in flight, plus the step it belongs to. On device the verdict took ~1.4s
+        // while the reasoner call it can overlap with takes 2.5-4.3s, so waiting for it inline
+        // spent a third of every navigation step on a question whose answer is not needed until
+        // the NEXT action is about to run. It is started here and resolved there instead.
+        var pending: Deferred<Reflection>? = null
+        var pendingStep: Pair<PilotAction, List<PilotElement>>? = null
+        val scope = CoroutineScope(currentCoroutineContext())
+        try {
         while (step < maxSteps) {
             step++
             if (actuator.cancelled()) { emit(AgentEvent.Final("Stopped.")); return@flow }
@@ -89,6 +112,10 @@ class PilotController(
             // Terminal actions first.
             when (action) {
                 is PilotAction.Done -> {
+                    // The model has concluded, with the task, the whole history and the screen in
+                    // front of it. That beats an outstanding second opinion about one navigation,
+                    // so the last step is kept and the verdict is dropped rather than awaited.
+                    pendingStep?.let { (a, els) -> commitTrace(a, els) }
                     // Say why a routine wasn't kept. Silently dropping it is the worst outcome:
                     // the task visibly succeeded, no routine appears, and there is nothing to
                     // debug — which is exactly what a long taught routine used to do.
@@ -124,6 +151,34 @@ class PilotController(
                 else -> {}
             }
             if (actuator.cancelled()) { emit(AgentEvent.Final("Stopped.")); return@flow }
+
+            // Resolve the previous step's verdict, now that it has had a whole reasoner call to
+            // finish in. This must happen BEFORE the action just chosen runs: that action was
+            // planned on a screen we may be about to leave, so executing it first would act on a
+            // page already judged wrong.
+            val verdict = pending?.let { runCatching { it.await() }.getOrDefault(Reflection.MATCHED) }
+            pending = null
+            if (verdict == Reflection.WRONG_PAGE && rollbacks < MAX_ROLLBACKS) {
+                rollbacks++
+                pendingStep = null   // a wrong turn we are undoing is not a routine step
+                actuator.back()
+                settle(SETTLE_MS)
+                // Deliberately NOT clearing `attempted`, unlike the stuck-guard recovery below.
+                // That one escapes to a screen it has never seen; this returns to the screen it
+                // just left, and the entry it would erase is precisely the knowledge that this
+                // element leads somewhere wrong.
+                history.add(
+                    "that last screen is NOT where this task needs to go, so I went BACK. " +
+                        "Take a DIFFERENT route to the goal.",
+                )
+                emit(AgentEvent.ToolResult(
+                    UUID.randomUUID().toString(), "reflect",
+                    "wrong page — went back", true,
+                ))
+                continue   // discard the action chosen for a screen we have now left
+            }
+            pendingStep?.let { (a, els) -> commitTrace(a, els) }
+            pendingStep = null
 
             // Stuck guard: same action on the same screen 3x running → give up (not just any repeat,
             // so legit waits/re-scrolls aren't cut short). Args are whitespace-canonicalized —
@@ -190,50 +245,34 @@ class PilotController(
 
             // Outcome-annotated note (pi lesson: results carry verdict + post-state, never a
             // bare "tapped X"): tell the model where the action LANDED, or that it did nothing.
-            var rolledBack = false
             val outcome: String = if (!ok || !action.changesScreen()) note else {
                 val after = actuator.perceive()
                 val afterSig = after.joinToString("|") { "${it.text}:${it.bounds.joinToString(",")}" }
                 if (afterSig == screenSig) "$note → screen did NOT change (no effect)"
                 else {
-                    val landed = "now on: ${screenTitle(after)}"
-                    val wrong = rollbacks < MAX_ROLLBACKS && navigated(elements, after) &&
-                        reflect(task, note, elements, after) == Reflection.WRONG_PAGE
-                    if (!wrong) "$note → $landed" else {
-                        rollbacks++
-                        rolledBack = true
-                        actuator.back()
-                        settle(SETTLE_MS)
-                        // Deliberately NOT clearing `attempted` here, unlike the stuck-guard
-                        // recovery above. That one escapes to a screen it has never seen; this
-                        // one returns to the screen it just left, and the entry it would erase
-                        // is precisely the knowledge that this element leads somewhere wrong.
-                        // Leaving it means a model that re-taps is blocked on the second try
-                        // instead of buying another rollback.
-                        emit(AgentEvent.ToolResult(
-                            UUID.randomUUID().toString(), "reflect",
-                            "$landed — not where the task needs to go; went back", true,
-                        ))
-                        "$note → $landed, which is NOT where this task needs to go, so I went " +
-                            "BACK. Take a DIFFERENT route to the goal."
+                    // Only a navigation can land on the wrong page, and only then is the second
+                    // opinion worth buying. Started, not awaited — the next reasoner call is
+                    // several seconds of work this can hide behind.
+                    if (reflector != null && rollbacks < MAX_ROLLBACKS && navigated(elements, after)) {
+                        pending = scope.async { reflect(task, note, elements, after) }
                     }
+                    "$note → now on: ${screenTitle(after)}"
                 }
             }
-            if (ok && !rolledBack) {
-                // find() is a search, not a step: skip it without marking the trace broken.
-                // Returning null here would have meant a single find() silently prevented the
-                // whole routine from ever being saved.
-                //
-                // A rolled-back action is skipped too: it is a wrong turn we already undid, and
-                // baking it into a routine would teach the detour as the route.
-                if (action !is PilotAction.FindText) {
-                    val ts = traceStepOf(action, elements)
-                    if (ts != null) trace.add(ts) else traceBroken = true
-                }
+            // Held, not committed: if the verdict comes back WRONG_PAGE this step is a detour we
+            // are about to undo, and baking it into a routine would teach the detour as the route.
+            if (ok) {
+                if (pending != null) pendingStep = action to elements
+                else commitTrace(action, elements)
             }
             history.add(outcome)
         }
         emit(AgentEvent.Final("Stopped after $maxSteps steps."))
+        } finally {
+            // Never leave a verdict in flight: it is a child of this flow's job, so an unfinished
+            // one would hold up completion for a question nobody is going to ask any more.
+            pending?.cancel()
+        }
     }.flowOn(Dispatchers.IO) // network (reasoner) + a11y calls must run off the main thread
 
     /**

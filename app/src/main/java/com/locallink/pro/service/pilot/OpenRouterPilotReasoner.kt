@@ -1,6 +1,8 @@
 package com.locallink.pro.service.pilot
 
+import android.os.SystemClock
 import android.util.Base64
+import android.util.Log
 import com.locallink.pro.data.local.SettingsPreferences
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -16,6 +18,7 @@ class OpenRouterPilotReasoner(
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build(),
 ) : PilotReasoner {
     companion object {
+        private const val TAG = "PilotTiming"
         /**
          * How many on-screen elements go into one prompt.
          *
@@ -68,8 +71,14 @@ class OpenRouterPilotReasoner(
             .addHeader("Authorization", "Bearer $key")
             .addHeader("HTTP-Referer", "https://omnipin.app").addHeader("X-Title", "OmniPin")
             .post(body.toString().toRequestBody(json)).build()
+        val startedAt = SystemClock.uptimeMillis()
         http.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
+            // Where a step's wall-clock actually goes. The reasoner call dominates by so much
+            // that trimming settle delays or element counts is rounding error next to it.
+            Log.d(TAG, "reason ${SystemClock.uptimeMillis() - startedAt}ms " +
+                "elements=${shown.size}/${elements.size} shot=${screenshot?.size ?: 0}B " +
+                "history=${history.size}")
             if (!resp.isSuccessful) return "ask" to """{"question":"Cloud error ${resp.code}; retry?"}"""
             val msg = JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
                 ?: return "ask" to """{"question":"No response; retry?"}"""

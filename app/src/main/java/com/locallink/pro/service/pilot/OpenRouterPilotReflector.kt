@@ -87,9 +87,13 @@ class OpenRouterPilotReflector(
             // call that could never return B. A cap is not a cost for a model that answers in one
             // token; it is only a ceiling for one that thinks first.
             //
-            // 300 still truncated on roughly one navigation in five, so each of those was a call
-            // bought and thrown away. 700 is sized to stop that rather than to be tidy.
-            .put("max_tokens", 700)
+            // 300 still truncated on roughly one navigation in five, and 700 still truncated on a
+            // Google results page — 5.5s and a `length` finish for a verdict that then defaulted
+            // to MATCHED. Each of those is a call bought and thrown away, so the ceiling is set to
+            // stop that happening rather than to look tidy. A model that answers in one token
+            // still pays for one token; this only binds the ones that think first, and reflection
+            // no longer sits on the critical path where their thinking would be felt.
+            .put("max_tokens", 1500)
             // Keep that thinking short where the model supports the knob. OpenRouter drops it for
             // models that don't, so this is safe to send unconditionally.
             .put("reasoning", JSONObject().put("effort", "low"))
@@ -98,7 +102,9 @@ class OpenRouterPilotReflector(
             .addHeader("HTTP-Referer", "https://omnipin.app").addHeader("X-Title", "OmniPin")
             .post(body.toString().toRequestBody(json)).build()
 
+        val startedAt = android.os.SystemClock.uptimeMillis()
         http.newCall(req).execute().use { resp ->
+            val elapsed = android.os.SystemClock.uptimeMillis() - startedAt
             if (!resp.isSuccessful) {
                 Log.w(TAG, "HTTP ${resp.code} — treating as MATCHED")
                 return Reflection.MATCHED
@@ -113,7 +119,7 @@ class OpenRouterPilotReflector(
             // empty-content bug above; the landing labels are here because the first device run
             // gave the SAME navigation an A and then a B, and without them there is no way to
             // tell an unstable judge from two genuinely different screens.
-            Log.d(TAG, "$verdict [${choice?.optString("finish_reason")}] " +
+            Log.d(TAG, "$verdict ${elapsed}ms [${choice?.optString("finish_reason")}] " +
                 "said \"${content.trim().take(24)}\" after: $actionNote " +
                 "→ landed on: ${labels(after).replace("\n- ", " · ").removePrefix("- ").take(90)}")
             return verdict
