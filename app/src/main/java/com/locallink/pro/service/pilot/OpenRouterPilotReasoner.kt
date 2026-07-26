@@ -89,7 +89,17 @@ class OpenRouterPilotReasoner(
                 JSONObject()
                     .put("sort", "throughput")
                     .put("require_parameters", true)
-                    .put("preferred_min_throughput", JSONObject().put("p90", 40)),
+                    .put("preferred_min_throughput", JSONObject().put("p90", 40))
+                    // A named preference on top of the statistical one, because the statistical
+                    // one demonstrably did not bite: after adding sort+floor, three more runs
+                    // still routed to Fireworks at 12 tok/s. A floor ranks on a provider's
+                    // PUBLISHED p90, which is not a promise about this request.
+                    //
+                    // `order` with fallbacks left on, not `ignore`: this prefers the provider
+                    // measured fastest for the configured model and quietly falls through when it
+                    // is busy or does not serve that model at all. An exclusion list would be
+                    // faster right up until the day it made the app unusable.
+                    .put("order", org.json.JSONArray().put("Wafer")),
             )
         val req = Request.Builder().url("https://openrouter.ai/api/v1/chat/completions")
             .addHeader("Authorization", "Bearer $key")

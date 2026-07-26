@@ -54,13 +54,29 @@ class OpenRouterPlanner(
             .put(JSONObject().put("role", "system").put("content", PLANNER_SYSTEM))
             .put(JSONObject().put("role", "user").put("content", user))
         val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.3)
+            // Deliberately NOT capping reasoning here — how a request is broken into steps is
+            // worth thinking about, and a bad plan costs far more than the seconds saved. Speed
+            // comes from which provider answers: measured 4-5x between providers on one model.
+            .put(
+                "provider",
+                JSONObject().put("sort", "throughput").put("require_parameters", true),
+            )
         val req = Request.Builder().url("https://openrouter.ai/api/v1/chat/completions")
             .addHeader("Authorization", "Bearer $key")
             .addHeader("HTTP-Referer", "https://omnipin.app").addHeader("X-Title", "OmniPin")
             .post(body.toString().toRequestBody(json)).build()
+        val startedAt = android.os.SystemClock.uptimeMillis()
         return runCatching {
             http.newCall(req).execute().use { resp ->
                 val text = resp.body?.string().orEmpty()
+                // Voice makes this leg visible: nothing happens on screen until the plan lands,
+                // so it is the gap between speaking and the phone moving.
+                android.util.Log.d(
+                    "PilotTiming",
+                    "plan ${android.os.SystemClock.uptimeMillis() - startedAt}ms " +
+                        "reasoning=${JSONObject(text).optJSONObject("usage")
+                            ?.optJSONObject("completion_tokens_details")?.optInt("reasoning_tokens")}",
+                )
                 if (!resp.isSuccessful) return fallback
                 val content = JSONObject(text).optJSONArray("choices")?.optJSONObject(0)
                     ?.optJSONObject("message")?.optString("content").orEmpty()

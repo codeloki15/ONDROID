@@ -472,7 +472,18 @@ class OpenRouterClient @Inject constructor(
             .put("temperature", 0.0)
             .put("tools", tools)
             .put("tool_choice", "auto")
+            // This is a routing decision — "does one local tool finish this?" — not a piece of
+            // reasoning. It sits on the critical path in front of the planner and the first pilot
+            // step, so on a reasoning model it was three full deliberations before the first tap.
+            // Declining wrongly is already safe: the pilot runs anyway.
+            .put("reasoning", JSONObject().put("effort", "none"))
+            .put(
+                "provider",
+                JSONObject().put("sort", "throughput").put("require_parameters", true),
+            )
+        val startedAt = android.os.SystemClock.uptimeMillis()
         runCatching { postChat(key, body) }
+            .onSuccess { Log.d(TAG, "singleToolTurn ${android.os.SystemClock.uptimeMillis() - startedAt}ms") }
             .onFailure { Log.w(TAG, "singleToolTurn failed: ${it.message}") }
             .getOrNull()
     }
