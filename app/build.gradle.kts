@@ -54,7 +54,7 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            // MediaPipe + sherpa-onnx both ship native libs; keep the first if any collide.
+            // sherpa-onnx ships native libs for several ABIs; keep the first if any collide.
             pickFirsts += listOf("**/*.so")
             // Skip native symbol stripping (slow on this filesystem; unneeded for debug sideload).
             keepDebugSymbols += "**/*.so"
@@ -71,10 +71,6 @@ dependencies {
     // Sherpa-ONNX (on-device TTS)
     implementation(files("libs/sherpa-onnx-1.12.23.aar"))
 
-    // On-device LLM (MediaPipe GenAI) — Gemma 3n
-    implementation("com.google.mediapipe:tasks-genai:0.10.27")
-    // Provides com.google.mediapipe.framework.image (MPImage/BitmapImageBuilder) for vision input
-    implementation("com.google.mediapipe:tasks-vision:0.10.26")
 
     // CameraX (vision input)
     implementation("androidx.camera:camera-core:1.4.1")

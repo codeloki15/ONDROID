@@ -25,7 +25,7 @@ import javax.inject.Singleton
  * on Composio's cloud (Gmail/Slack/GitHub/…), keyed by the user's `user_id`.
  *
  * Composio tool slugs are UPPERCASE_WITH_UNDERSCORES, which never collide with our local
- * snake_case tools — that's how [ToolRouter] dispatches.
+ * snake_case tools, so the two namespaces never collide.
  */
 @Singleton
 class ComposioClient @Inject constructor(

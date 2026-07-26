@@ -36,8 +36,7 @@ class OpenRouterUnavailable(val reason: String, cause: Throwable? = null) : Exce
 
 /**
  * Cloud brain via OpenRouter (OpenAI-compatible). Runs the chat + tool-calling loop using
- * the user's selected model, executing tool calls through [ToolRouter] — which exposes
- * **Composio cloud tools only** (the on-device tools are not advertised or run). Emits
+ * the user's selected model, executing Composio cloud tools directly over REST. Emits
  * [AgentEvent]s so it reuses the chat UI wiring. Also lists models for the picker.
  */
 @Singleton

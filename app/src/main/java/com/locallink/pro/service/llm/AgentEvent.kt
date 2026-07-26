@@ -1,6 +1,6 @@
 package com.locallink.pro.service.llm
 
-/** Events emitted by [AgentOrchestrator] as it runs the chat + tool loop. */
+/** Events emitted by the chat and pilot loops as a run progresses. */
 sealed interface AgentEvent {
     /**
      * An incremental chunk of the assistant's reply — a DELTA, not a snapshot. Consumers must

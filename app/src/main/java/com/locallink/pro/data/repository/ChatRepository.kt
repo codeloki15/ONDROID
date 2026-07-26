@@ -11,7 +11,6 @@ import android.util.Log
 import com.locallink.pro.data.local.EngineMode
 import com.locallink.pro.data.local.SettingsPreferences
 import com.locallink.pro.service.llm.AgentEvent
-import com.locallink.pro.service.llm.AgentOrchestrator
 import com.locallink.pro.service.llm.OpenRouterClient
 import com.locallink.pro.service.llm.OpenRouterUnavailable
 import com.locallink.pro.service.pilot.MemoryPilot
@@ -30,7 +29,6 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor(
     private val sessionDao: SessionDao,
     private val messageDao: MessageDao,
-    private val agent: AgentOrchestrator,
     private val openRouter: OpenRouterClient,
     private val settings: SettingsPreferences,
     private val experiences: ExperienceStore,
