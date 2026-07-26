@@ -87,12 +87,18 @@ object PilotActionSchema {
                 .put("to_id", int("id to drop onto")), listOf("from_id", "to_id")),
         )
         val type = fn(
-            "type", "Type text into the editable element with the given id.",
+            "type",
+            "Set the editable element's text. This REPLACES everything already in the field — " +
+                "it is not an insert. To add to existing text, include the existing text in what " +
+                "you send. To empty a field, use clear.",
             obj(JSONObject().put("id", int("id of the text field"))
-                .put("text", str("text to type")), listOf("id", "text")),
+                .put("text", str("the field's full new contents (replaces what is there)")),
+                listOf("id", "text")),
         )
         val clear = fn(
-            "clear", "Clear all text from the editable element with the given id.",
+            "clear",
+            "Empty the editable element (select-all then delete). Only needed when the field " +
+                "should end up blank — type already replaces the contents.",
             obj(JSONObject().put("id", int("id of the text field")), listOf("id")),
         )
         val pressEnter = fn(
