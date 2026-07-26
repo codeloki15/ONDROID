@@ -30,6 +30,7 @@ app/src/main/java/com/locallink/pro/
 │   └── ComposioClient.kt                  # REST: app grid, OAuth connect/disconnect
 ├── service/pilot/                         # Automate: PlanExecutor, PilotController, MemoryPilot,
 │   │                                      #   ExperienceReplayer (learned routines), OmniAccessibilityService
+│   ├── PilotReflector.kt                  # A/B/C verdict on where a navigation landed (+ OpenRouter impl)
 │   └── PilotActionSchema.kt               # the pilot's action-space prompt
 ├── service/routine/                       # routine scheduling: RoutineScheduler (WorkManager,
 │                                          #   self-chaining daily) + RoutineWorker → runAgent
@@ -112,6 +113,19 @@ app/src/main/java/com/locallink/pro/
     user's own taps captured `tap com.android.launcher:id/icon` for "open the app from the
     home screen", a target that cannot exist at replay time, and the routine failed on step
     1. Guided teaching avoids this by construction because Omni executes each step itself.
+14. **A tight `max_tokens` on a reasoning model returns EMPTY content, and a safe default then
+    hides that the feature is dead.** `OpenRouterPilotReflector` asks for one letter, so it was
+    capped at 4 tokens. The default model reasons before answering, spent the budget there, and
+    stopped at `finish_reason: "length"` with a null `content` — which org.json returns as the
+    literal string `"null"`. The "anything unclear means MATCHED" guard swallowed every one, so
+    reflection ran, cost a call per navigation, and could never intervene. Nothing failed and no
+    test could catch it. Size the budget for the model that *thinks first*, and log
+    `finish_reason` on any advisory call whose healthy outcome is silence.
+15. **`done(result)` is NOT the user-facing reply — `PlanExecutor` emits the terminal message.**
+    It used to hardcode `"Done."` for any plan touching the device, discarding the pilot report
+    it had just collected: "how much storage is free" navigated correctly, read the figure, and
+    answered "Done." Before rewording a prompt that looks ignored, check whether something
+    downstream is throwing the output away.
 
 ## Cross-cutting systems
 
@@ -155,6 +169,13 @@ app/src/main/java/com/locallink/pro/
 - **Routine-informed planning**: on a near-miss, `ExperienceStore.priorRoutinesBlock`
   feeds similar learned routines to the planner as worked examples via `PlanExecutor`'s
   `priorRoutines`, instead of planning from scratch.
+- **Step reflection** (`PilotReflector`): after a navigation, a text-only call judges whether the
+  screen is somewhere the task needs to be (Mobile-Agent-v2's A/B/C verdict). `NO_CHANGE` stays
+  mechanical — identical screen signatures already say it for free — and only *navigations* are
+  reflected on, told from scrolls by element-set overlap, so a step's cost is not doubled.
+  `WRONG_PAGE` presses Back and keeps that action out of the saved routine. Everything degrades
+  to `MATCHED`; rollbacks cap at 3. Background and open questions: `docs/plans/` (local only,
+  `docs/` is gitignored).
 
 ## Model assets (Git LFS)
 
