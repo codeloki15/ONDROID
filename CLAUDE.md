@@ -30,7 +30,6 @@ app/src/main/java/com/locallink/pro/
 ├── service/routine/                       # routine scheduling: RoutineScheduler (WorkManager,
 │                                          #   self-chaining daily) + RoutineWorker → runAgent
 ├── service/notify/OmniNotificationListener.kt  # notification triggers (rules in Room) → speak/agent
-├── service/call/                          # dial fast-path support + in-call speakerphone assistant (beta)
 ├── service/voice/
 │   ├── VoiceLoopController.kt             # hands-free "Hey Omni" state machine (mic is single-owner!)
 │   ├── WakeWordEngine.kt                  # sherpa-onnx KeywordSpotter (assets/kws)

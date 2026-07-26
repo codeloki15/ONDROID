@@ -15,7 +15,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -123,28 +122,6 @@ fun SettingsScreen(
                             viewModel.setHandsFree(on)
                             if (on) com.locallink.pro.service.voice.VoiceLoopService.start(ctx)
                             else com.locallink.pro.service.voice.VoiceLoopService.stop(ctx)
-                        }
-                    )
-                    val phonePerm = androidx.activity.compose.rememberLauncherForActivityResult(
-                        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-                    ) { granted ->
-                        if (granted) com.locallink.pro.service.call.CallAssistUtil.restart(ctx)
-                    }
-                    SettingsToggle(
-                        title = "Wake on a repeated \"Hey Omni\"",
-                        subtitle = "If it often misses you, say it twice — costs a little extra battery",
-                        icon = Icons.Outlined.RecordVoiceOver,
-                        checked = uiState.wakeRepeat,
-                        onCheckedChange = viewModel::setWakeRepeat,
-                    )
-                    SettingsToggle(
-                        title = "In-call assistant (experimental)",
-                        subtitle = "Limited: Android 12+ blocks call audio for apps — full version (dialer mode) coming",
-                        icon = Icons.Outlined.Call,
-                        checked = uiState.callAssist,
-                        onCheckedChange = { on ->
-                            viewModel.setCallAssist(on)
-                            if (on) phonePerm.launch(android.Manifest.permission.READ_PHONE_STATE)
                         }
                     )
                     SettingsToggle(
