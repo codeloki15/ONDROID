@@ -100,7 +100,15 @@ app/src/main/java/com/locallink/pro/
     is meaningless on replay) must be skipped explicitly at the call site, not by
     returning null. Getting this wrong means one `find()` silently prevents any routine
     from being saved.
-12. **A taught routine must contain only actions the PILOT can perform.** Recording the
+12. **Reliability comes from feedback the model can act on, not from more prompting.** Three
+    mechanisms carry it, and each replaced a dead end:
+    - post-action outcome notes say where the action LANDED, or "screen did NOT change (no effect)"
+    - an invalid element id reports the ids that DO exist, so a wasted round trip becomes a
+      correction rather than another guess
+    - repeating the same action now triggers ONE Back-to-escape attempt before the run gives
+      up (dialogs and wrong tabs are the usual cause); it stops only if Back changes nothing,
+      because then the screen really is inert
+13. **A taught routine must contain only actions the PILOT can perform.** Recording the
     user's own taps captured `tap com.android.launcher:id/icon` for "open the app from the
     home screen", a target that cannot exist at replay time, and the routine failed on step
     1. Guided teaching avoids this by construction because Omni executes each step itself.

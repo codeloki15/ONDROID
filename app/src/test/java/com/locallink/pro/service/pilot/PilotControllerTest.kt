@@ -94,6 +94,48 @@ class PilotControllerTest {
         assertTrue("should stop well before maxSteps", actuator.tapped.size < 5)
     }
 
+    @Test fun goesBackToEscapeAStuckScreenInsteadOfGivingUp() = runTest {
+        // A run repeating itself is usually on a screen it didn't expect — a dialog, the wrong
+        // tab. Back escapes most of those, so it must try that before declaring failure.
+        var wentBack = false
+        val stuck = listOf(PilotElement(0, "Stuck", null, "id/stuck", null, intArrayOf(0, 0, 10, 10), true, false))
+        val escaped = listOf(PilotElement(0, "Escaped", null, "id/escaped", null, intArrayOf(0, 0, 10, 10), true, false))
+
+        val actuator = object : PilotActuator {
+            override fun perceive() = if (wentBack) escaped else stuck
+            override suspend fun tap(e: PilotElement) = true
+            override suspend fun longPress(e: PilotElement) = true
+            override suspend fun doubleTap(e: PilotElement) = true
+            override suspend fun drag(from: PilotElement, to: PilotElement) = true
+            override suspend fun type(e: PilotElement, text: String) = true
+            override fun clear(e: PilotElement) = true
+            override suspend fun pressEnter(e: PilotElement) = true
+            override suspend fun swipe(direction: String) = true
+            override fun launchApp(app: String) = true
+            override fun back(): Boolean { wentBack = true; return true }
+            override fun home() = true
+            override fun recents() = true
+            override fun notifications() = true
+            override fun quickSettings() = true
+            override fun cancelled() = false
+        }
+
+        // Taps forever on the stuck screen; once Back escapes, reports done.
+        val ctrl = PilotController(
+            reasoner = PilotReasoner { _, _, _, _ ->
+                if (wentBack) "done" to """{"result":"recovered"}""" else "tap" to """{"id":0}"""
+            },
+            actuator = actuator,
+            maxSteps = 25,
+        )
+        val events = ctrl.run("escape").toList()
+
+        assertTrue("should have tried Back to get unstuck", wentBack)
+        val last = events.last()
+        assertTrue(last is AgentEvent.Final)
+        assertEquals("recovered", (last as AgentEvent.Final).text)
+    }
+
     @Test fun launchAppIsDispatched() = runTest {
         val script = ArrayDeque(listOf(
             "launch_app" to """{"app":"Settings"}""", "done" to """{"result":"opened"}""",

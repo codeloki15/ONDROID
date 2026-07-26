@@ -59,6 +59,7 @@ class PilotController(
         var traceBroken = false  // an untraceable step ran → replaying the rest would diverge
         var lastActionSig: String? = null
         var stuckCount = 0
+        var recoveryTried = false   // one Back-to-escape attempt per run, not a loop
         var step = 0
         // Mechanical repeat-blocker (pi-style guard hook): same action on the same screen
         // twice is never executed again — the model is told to choose differently.
@@ -126,6 +127,33 @@ class PilotController(
             if (actionSig == lastActionSig) stuckCount++ else stuckCount = 0
             lastActionSig = actionSig
             if (stuckCount >= 2) {
+                // Try to get unstuck before giving up. Repetition usually means the run is on a
+                // screen it didn't expect — a dialog, a permission sheet, the wrong tab — and
+                // Back escapes most of those. Only stop if that changes nothing, because then
+                // the screen really is inert and more steps won't help.
+                if (!recoveryTried) {
+                    recoveryTried = true
+                    val before = screenSig
+                    actuator.back()
+                    settle(SETTLE_MS)
+                    val after = actuator.perceive()
+                        .joinToString("|") { "${it.text}:${it.bounds.joinToString(",")}" }
+                    if (after != before) {
+                        stuckCount = 0
+                        lastActionSig = null
+                        attempted.clear()   // the old screen's blocks don't apply here
+                        history.add(
+                            "was stuck repeating the same action, so went BACK to escape it — " +
+                                "you are now on a different screen. Re-read the elements and take " +
+                                "a different route to the goal.",
+                        )
+                        emit(AgentEvent.ToolResult(
+                            UUID.randomUUID().toString(), "recover",
+                            "went back to escape a stuck screen", true,
+                        ))
+                        continue
+                    }
+                }
                 emit(AgentEvent.Final("Stopped — repeating the same action with no effect. Try rephrasing."))
                 return@flow
             }
@@ -263,27 +291,35 @@ class PilotController(
             val chosen = elements.firstOrNull { it.id == id } ?: return null
             return freshen(chosen)
         }
+        // Saying only "no element 47" leaves the model guessing again next step. Naming the
+        // ids that DO exist turns a wasted round trip into a correction it can act on.
+        fun noSuchId(verb: String, id: Int): Pair<Boolean, String> {
+            val valid = elements.map { it.id }
+            val range = if (valid.isEmpty()) "there are no elements on this screen"
+            else "valid ids on this screen are ${valid.min()}-${valid.max()}"
+            return false to "$verb: there is no element $id — $range. Re-read the list and pick one."
+        }
         return when (action) {
             is PilotAction.Tap -> el(action.id)?.let { actuator.tap(it) to "tapped id ${action.id} (${it.label()})" }
-                ?: (false to "tap: no element id ${action.id}")
+                ?: noSuchId("tap", action.id)
             is PilotAction.LongPress -> el(action.id)?.let { actuator.longPress(it) to "long-pressed id ${action.id}" }
-                ?: (false to "long_press: no element id ${action.id}")
+                ?: noSuchId("long_press", action.id)
             is PilotAction.DoubleTap -> el(action.id)?.let { actuator.doubleTap(it) to "double-tapped id ${action.id}" }
-                ?: (false to "double_tap: no element id ${action.id}")
+                ?: noSuchId("double_tap", action.id)
             is PilotAction.Drag -> {
                 val from = el(action.fromId); val to = el(action.toId)
-                if (from == null || to == null) false to "drag: missing element id"
+                if (from == null || to == null) noSuchId("drag", if (from == null) action.fromId else action.toId)
                 else actuator.drag(from, to) to "dragged ${action.fromId}→${action.toId}"
             }
             is PilotAction.Type -> el(action.id)?.let { actuator.type(it, action.text) to "typed \"${action.text}\" into id ${action.id}" }
-                ?: (false to "type: no element id ${action.id}")
+                ?: noSuchId("type", action.id)
             is PilotAction.Clear -> el(action.id)?.let { actuator.clear(it) to "cleared id ${action.id}" }
-                ?: (false to "clear: no element id ${action.id}")
+                ?: noSuchId("clear", action.id)
             is PilotAction.PressEnter -> el(action.id)?.let {
                 val ok = actuator.pressEnter(it)
                 ok to if (ok) "pressed enter on id ${action.id}"
                       else "enter not available here — look for a search/submit control instead"
-            } ?: (false to "press_enter: no element id ${action.id}")
+            } ?: noSuchId("press_enter", action.id)
             is PilotAction.FindText -> findOnScreen(action.text)
             is PilotAction.Swipe -> actuator.swipe(action.direction) to "swiped ${action.direction}"
             // scroll(dir) reveals content in that direction → finger swipes the OPPOSITE way.
