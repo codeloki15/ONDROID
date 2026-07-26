@@ -162,6 +162,7 @@ class OmniAccessibilityService : AccessibilityService() {
         override suspend fun drag(from: PilotElement, to: PilotElement) = withPillHidden { this@OmniAccessibilityService.drag(from, to) }
         override suspend fun type(e: PilotElement, text: String) = typeText(e, text)
         override fun clear(e: PilotElement) = clearText(e)
+        override suspend fun pressEnter(e: PilotElement) = imeEnter(e)
         override suspend fun swipe(direction: String) = withPillHidden { this@OmniAccessibilityService.swipe(direction) }
         override fun launchApp(app: String) = this@OmniAccessibilityService.launchApp(app)
         override fun back() = goBack()
@@ -194,6 +195,22 @@ class OmniAccessibilityService : AccessibilityService() {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    /**
+     * Fire the IME action (Search / Go / Send) on a text field.
+     *
+     * ACTION_IME_ENTER is API 30+. Below that there is no accessibility route to the keyboard's
+     * action key, so this reports failure and the model falls back to finding a submit control —
+     * which is what it had to do for every app before this action existed.
+     */
+    fun imeEnter(element: PilotElement): Boolean {
+        if (cancelFlag.get()) return false
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return false
+        val node = findNode(element) ?: return false
+        return node.performAction(
+            AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id,
+        )
     }
 
     /** Swipe/scroll across the screen center in a direction. [dir] = up|down|left|right. */

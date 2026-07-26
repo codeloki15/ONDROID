@@ -26,6 +26,7 @@ class PilotControllerTest {
         override suspend fun drag(from: PilotElement, to: PilotElement) = true
         override suspend fun type(e: PilotElement, text: String) = true
         override fun clear(e: PilotElement) = true
+        override suspend fun pressEnter(e: PilotElement) = true
         override suspend fun swipe(direction: String) = true
         override fun launchApp(app: String) = true
         override fun back() = true
@@ -106,6 +107,7 @@ class PilotControllerTest {
             override suspend fun drag(from: PilotElement, to: PilotElement) = true
             override suspend fun type(e: PilotElement, text: String) = true
             override fun clear(e: PilotElement) = true
+            override suspend fun pressEnter(e: PilotElement) = true
             override suspend fun swipe(direction: String) = true
             override fun launchApp(app: String): Boolean { launched = app; return true }
             override fun back() = true

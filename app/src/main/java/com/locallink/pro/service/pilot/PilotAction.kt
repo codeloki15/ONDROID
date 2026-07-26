@@ -9,6 +9,14 @@ sealed interface PilotAction {
     data class Drag(val fromId: Int, val toId: Int) : PilotAction
     data class Type(val id: Int, val text: String) : PilotAction
     data class Clear(val id: Int) : PilotAction
+
+    /**
+     * Fire the keyboard's action key (Search / Go / Send) on a text field.
+     *
+     * Typing only sets a field's text; plenty of apps have no visible submit control and
+     * expect the IME action instead, so without this a search could be typed and never run.
+     */
+    data class PressEnter(val id: Int) : PilotAction
     data class Swipe(val direction: String) : PilotAction   // up | down | left | right
     data class Scroll(val direction: String) : PilotAction  // up | down
     data class LaunchApp(val query: String) : PilotAction    // app name or package
@@ -40,7 +48,7 @@ object ScrollMap {
 object PilotActionParser {
     /** Every action the model may emit. Kept in sync with [PilotActionSchema.toolsJson]. */
     val ALLOWED = setOf(
-        "tap", "long_press", "double_tap", "drag", "type", "clear",
+        "tap", "long_press", "double_tap", "drag", "type", "clear", "press_enter",
         "swipe", "scroll", "launch_app",
         "back", "home", "recents", "notifications", "quick_settings",
         "wait", "done", "ask",
@@ -66,6 +74,7 @@ object PilotActionParser {
             "long_press" -> needId(args, "long_press", PilotAction::LongPress)
             "double_tap" -> needId(args, "double_tap", PilotAction::DoubleTap)
             "clear" -> needId(args, "clear", PilotAction::Clear)
+            "press_enter" -> needId(args, "press_enter", PilotAction::PressEnter)
             "drag" -> if (args.has("from_id") && args.has("to_id"))
                 PilotAction.Drag(args.getInt("from_id"), args.getInt("to_id"))
             else PilotAction.Invalid("drag requires 'from_id' and 'to_id'")

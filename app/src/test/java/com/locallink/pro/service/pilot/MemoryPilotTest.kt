@@ -22,6 +22,7 @@ class MemoryPilotTest {
         override suspend fun drag(from: PilotElement, to: PilotElement): Boolean { driven.add("drag"); return true }
         override suspend fun type(e: PilotElement, text: String): Boolean { driven.add("type:${e.id}:$text"); return true }
         override fun clear(e: PilotElement): Boolean { driven.add("clear:${e.id}"); return true }
+        override suspend fun pressEnter(e: PilotElement): Boolean { driven.add("press_enter:${e.id}"); return true }
         override suspend fun swipe(direction: String): Boolean { driven.add("swipe:$direction"); return true }
         override fun launchApp(app: String): Boolean { driven.add("launch:$app"); return true }
         override fun back(): Boolean { driven.add("back"); return true }

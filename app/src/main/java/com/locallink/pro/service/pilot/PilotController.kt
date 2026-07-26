@@ -26,6 +26,7 @@ interface PilotActuator {
     suspend fun drag(from: PilotElement, to: PilotElement): Boolean
     suspend fun type(e: PilotElement, text: String): Boolean
     fun clear(e: PilotElement): Boolean
+    suspend fun pressEnter(e: PilotElement): Boolean
     suspend fun swipe(direction: String): Boolean
     fun launchApp(app: String): Boolean
     fun back(): Boolean
@@ -224,6 +225,11 @@ class PilotController(
                 ?: (false to "type: no element id ${action.id}")
             is PilotAction.Clear -> el(action.id)?.let { actuator.clear(it) to "cleared id ${action.id}" }
                 ?: (false to "clear: no element id ${action.id}")
+            is PilotAction.PressEnter -> el(action.id)?.let {
+                val ok = actuator.pressEnter(it)
+                ok to if (ok) "pressed enter on id ${action.id}"
+                      else "enter not available here — look for a search/submit control instead"
+            } ?: (false to "press_enter: no element id ${action.id}")
             is PilotAction.Swipe -> actuator.swipe(action.direction) to "swiped ${action.direction}"
             // scroll(dir) reveals content in that direction → finger swipes the OPPOSITE way.
             is PilotAction.Scroll -> actuator.swipe(ScrollMap.toSwipe(action.direction)) to "scrolled ${action.direction}"
@@ -263,6 +269,7 @@ class PilotController(
             is PilotAction.DoubleTap -> target(action.id, "double_tap")
             is PilotAction.Type -> target(action.id, "type", action.text)
             is PilotAction.Clear -> target(action.id, "clear")
+            is PilotAction.PressEnter -> target(action.id, "press_enter")
             is PilotAction.Swipe -> TraceStep("swipe", action.direction)
             is PilotAction.Scroll -> TraceStep("scroll", action.direction)
             is PilotAction.LaunchApp -> TraceStep("launch_app", action.query)

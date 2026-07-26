@@ -43,6 +43,7 @@ class ExperienceReplayer(
                     "double_tap" -> actuator.doubleTap(el)
                     "type" -> actuator.type(el, step.arg ?: "")
                     "clear" -> actuator.clear(el)
+                    "press_enter" -> actuator.pressEnter(el)
                     else -> false
                 }
             } else {

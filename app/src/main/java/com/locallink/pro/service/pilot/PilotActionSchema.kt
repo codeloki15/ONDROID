@@ -21,7 +21,9 @@ object PilotActionSchema {
 
         Navigation you have: launch_app (open any app), home, back, recents, notifications,
         quick_settings, scroll(up/down) to reveal off-screen items, swipe, tap, long_press,
-        double_tap, drag, type(id,text), clear, wait(ms) to let the screen settle.
+        double_tap, drag, type(id,text), clear, press_enter(id), wait(ms) to let the screen settle.
+        To RUN a search: type(id,text) then press_enter(id) — typing only fills the box.
+        If press_enter reports it isn't available, tap the app's own search/submit control.
 
         Loop discipline: emit exactly ONE action per step. After each action the screen changes —
         re-read the NEW element list to see the result. Never repeat the same tap that had no
@@ -93,6 +95,13 @@ object PilotActionSchema {
             "clear", "Clear all text from the editable element with the given id.",
             obj(JSONObject().put("id", int("id of the text field")), listOf("id")),
         )
+        val pressEnter = fn(
+            "press_enter",
+            "Press the keyboard's action key (Search / Go / Send) on a text field you just " +
+                "typed into. Use this to RUN a search when the app has no visible search button " +
+                "— typing alone only fills the box, it does not submit.",
+            obj(JSONObject().put("id", int("id of the text field to submit")), listOf("id")),
+        )
         val swipe = fn(
             "swipe", "Swipe the screen in a direction (to reveal content or change pages).",
             obj(JSONObject().put("direction",
@@ -127,7 +136,7 @@ object PilotActionSchema {
             obj(JSONObject().put("question", str("question for the user")), listOf("question")),
         )
         return JSONArray()
-            .put(tap).put(longPress).put(doubleTap).put(drag).put(type).put(clear)
+            .put(tap).put(longPress).put(doubleTap).put(drag).put(type).put(clear).put(pressEnter)
             .put(swipe).put(scroll).put(launchApp)
             .put(back).put(home).put(recents).put(notifications).put(quickSettings)
             .put(wait).put(done).put(ask)
